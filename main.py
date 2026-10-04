@@ -15,6 +15,7 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
+from rich import box
 from rich.console import Console
 from rich.table import Table
 
@@ -188,7 +189,7 @@ def selected_sites(cfg: Config, raw: str) -> list[str]:
 
 
 def cmd_check(cfg: Config, db: Database) -> int:
-    table = Table(title="Setup check", show_lines=False)
+    table = Table(title="Setup check", show_lines=False, box=box.ASCII)
     table.add_column("Item")
     table.add_column("Status")
     table.add_column("Detail", overflow="fold")
@@ -316,7 +317,7 @@ def cmd_report(cfg: Config, db: Database, days: int) -> int:
         if r["status"] in bucket:
             bucket[r["status"]] += 1
 
-    summary = Table(title="Last {0} days by source".format(days))
+    summary = Table(title="Last {0} days by source".format(days), box=box.ASCII)
     summary.add_column("Source")
     for col in ("found", "applied", "drafted", "needs_review", "skipped", "failed"):
         summary.add_column(col.replace("_", " "), justify="right")
@@ -340,14 +341,15 @@ def cmd_report(cfg: Config, db: Database, days: int) -> int:
     )
     console.print(summary)
 
-    detail = Table(title="Activity detail", show_lines=False)
+    # Six columns, not eight: on an 80-column terminal a wider table makes
+    # rich shrink "company" to "compa/ny". Company and role share one
+    # flexible column that folds instead of being truncated.
+    detail = Table(title="Activity detail", show_lines=False, box=box.ASCII)
     detail.add_column("date", no_wrap=True, min_width=10)
-    detail.add_column("site", no_wrap=True, min_width=11)
-    detail.add_column("company", no_wrap=True)
-    detail.add_column("role", no_wrap=True)
-    detail.add_column("score", justify="right", no_wrap=True)
-    detail.add_column("resume", no_wrap=True)
-    detail.add_column("status", no_wrap=True)
+    detail.add_column("site", no_wrap=True, min_width=6)
+    detail.add_column("company - role", overflow="fold", min_width=16)
+    detail.add_column("score / resume", no_wrap=True)
+    detail.add_column("status", no_wrap=True, min_width=12)
     for r in rows[:60]:
         status = r["status"]
         colour = {
@@ -360,10 +362,11 @@ def cmd_report(cfg: Config, db: Database, days: int) -> int:
         detail.add_row(
             r["date"],
             r["site"],
-            clip(r["company"], 24),
-            clip(r["role"], 30),
-            str(r["match_score"] if r["match_score"] is not None else "-"),
-            r["resume_variant"] or "-",
+            "{0} - {1}".format(clip(r["company"], 28), clip(r["role"], 34)),
+            "{0:>3} {1}".format(
+                r["match_score"] if r["match_score"] is not None else "-",
+                r["resume_variant"] or "",
+            ).rstrip(),
             "[{0}]{1}[/]".format(colour, status),
         )
     console.print(detail)
@@ -372,7 +375,7 @@ def cmd_report(cfg: Config, db: Database, days: int) -> int:
 
     skipped_reasons = [r for r in rows if r["status"] == "skipped" and r["error"]]
     if skipped_reasons:
-        reasons = Table(title="Why jobs were skipped")
+        reasons = Table(title="Why jobs were skipped", box=box.ASCII)
         reasons.add_column("Company / role", overflow="fold")
         reasons.add_column("Reason", overflow="fold")
         for r in skipped_reasons[:20]:
@@ -409,10 +412,10 @@ def cmd_followups(cfg: Config, db: Database) -> int:
             )
         )
         return 0
-    table = Table(title="Follow-ups queued (not sent)")
+    table = Table(title="Follow-ups queued (not sent)", box=box.ASCII)
     table.add_column("applied", no_wrap=True)
-    table.add_column("company", max_width=24)
-    table.add_column("role", max_width=28)
+    table.add_column("company", overflow="fold")
+    table.add_column("role", overflow="fold")
     table.add_column("channel", no_wrap=True)
     for r in rows:
         table.add_row(r["applied_on"], r["company"], r["role"], r["channel"])
@@ -429,7 +432,7 @@ def cmd_followups(cfg: Config, db: Database) -> int:
 
 
 def print_run_summary(cfg: Config, db: Database, stats) -> None:
-    table = Table(title="This run")
+    table = Table(title="This run", box=box.ASCII)
     table.add_column("Source", no_wrap=True)
     for col in ("found", "applied", "drafted", "needs review", "skipped", "failed"):
         table.add_column(col, justify="right", no_wrap=True)
