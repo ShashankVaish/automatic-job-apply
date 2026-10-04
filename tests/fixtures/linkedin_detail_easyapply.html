@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Frontend Engineer Intern | LinkedIn</title></head>
+<body>
+<!-- A LinkedIn posting using Easy Apply (stays on LinkedIn). -->
+<div class="job-details-jobs-unified-top-card__job-title"><h1 class="t-24">Frontend Engineer Intern</h1></div>
+<div class="job-details-jobs-unified-top-card__company-name"><a href="/company/fixture">Fixture Labs</a></div>
+<div class="job-details-jobs-unified-top-card__primary-description-container">
+  <span class="tvm__text">Noida, Uttar Pradesh, India</span>
+</div>
+<span class="jobs-unified-top-card__posted-date">3 days ago</span>
+
+<div class="jobs-apply-button--top-card">
+  <button class="jobs-apply-button" aria-label="Easy Apply to Frontend Engineer Intern at Fixture Labs">
+    Easy Apply
+  </button>
+</div>
+
+<div id="job-details" class="jobs-description__content">
+  <p>We are hiring a frontend engineer intern to work with React, JavaScript and
+  CSS on our customer dashboard. You will pair with senior engineers and own
+  small features end to end. 0-1 years of experience. Paid internship.</p>
+</div>
+
+<div class="jobs-easy-apply-modal" role="dialog" style="display:none">
+  <div class="jobs-easy-apply-content">
+    <label for="ea-email">Email address</label>
+    <input type="email" id="ea-email" name="email">
+    <label for="ea-phone">Mobile phone number</label>
+    <input type="tel" id="ea-phone" name="phone">
+    <label for="ea-resume">Upload resume</label>
+    <input type="file" id="ea-resume" name="resume">
+    <label for="ea-years">How many years of work experience do you have with React?</label>
+    <input type="number" id="ea-years" name="years">
+    <fieldset>
+      <legend>Are you willing to work on-site in Noida?</legend>
+      <label><input type="radio" name="onsite" value="Yes"> Yes</label>
+      <label><input type="radio" name="onsite" value="No"> No</label>
+    </fieldset>
+    <label><input type="checkbox" id="follow-company-checkbox" checked> Follow Fixture Labs</label>
+    <button aria-label="Submit application">Submit application</button>
+  </div>
+</div>
+
+<script>
+document.querySelector('.jobs-apply-button').addEventListener('click', function () {
+  document.querySelector('.jobs-easy-apply-modal').style.display = 'block';
+});
+</script>
+</body></html>

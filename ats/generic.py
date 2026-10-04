@@ -52,9 +52,12 @@ class GenericFiller(ATSFiller):
         return True
 
     def has_form(self) -> bool:
+        """A form that exists but is hidden behind an Apply button doesn't
+        count - we still have to click through to it."""
         for sel in APPLY_HINTS:
             try:
-                if page_count(self.page, sel) >= 1:
+                loc = self.page.locator(sel).first
+                if loc.count() and loc.is_visible(timeout=700):
                     return True
             except Exception:
                 continue

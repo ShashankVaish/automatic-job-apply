@@ -37,6 +37,9 @@ class JobSource:
 
     name = "base"
     base_url = ""
+    # Host fragment used by off_board() to tell "still on the board" from
+    # "this links out to the employer".
+    board_host = ""
     # Boards whose own apply flow we are allowed to use at all.
     has_own_apply_flow = False
 
@@ -182,6 +185,25 @@ class JobSource:
         except Exception:
             return False
         return bool(host) and board_host_fragment not in host
+
+    def off_board(self, href: str) -> bool:
+        """True when a href leads somewhere other than this job board.
+
+        The href is resolved against the current page first, so a relative link
+        on a live board correctly comes back as on-board. A resolved URL with
+        no host at all is a local file (the test fixtures), which is treated as
+        off-board so routing can be exercised without touching the internet.
+        """
+        if not href:
+            return False
+        resolved = self.absolute(href)
+        try:
+            host = (urlparse(resolved).netloc or "").lower()
+        except Exception:
+            return False
+        if not host:
+            return True
+        return self.board_host not in host
 
     def route(self, job: Job) -> Job:
         """Decide where this job actually gets applied to.

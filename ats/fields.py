@@ -133,10 +133,23 @@ def _attrs(locator: Any) -> dict[str, str]:
         return {}
 
 
+def clean_label(label: str) -> str:
+    """Strip the required-marker noise that would break an exact-match rule.
+
+    "Name *", "Name(Required)" and "Name✱" all have to classify the same way
+    as "Name", or a label like `^name$` never matches a real form.
+    """
+    text = " ".join((label or "").split())
+    text = re.sub(r"[\*✱∗٭]+", " ", text)
+    text = re.sub(r"\(\s*(required|optional)\s*\)", " ", text, flags=re.I)
+    text = re.sub(r"\b(required|optional)\b", " ", text, flags=re.I)
+    return " ".join(text.split()).strip(" :·-")
+
+
 def _haystack(label: str, attrs: dict[str, str]) -> str:
     return " ".join(
         [
-            label,
+            clean_label(label),
             attrs.get("name", ""),
             attrs.get("id", ""),
             attrs.get("placeholder", ""),
@@ -211,6 +224,7 @@ NEVER_AUTOFILL = {"referral", "how did you hear"}
 
 def classify(label: str, attrs: dict[str, str]) -> str:
     hay = _haystack(label, attrs)
+    label_only = clean_label(label).lower()
     if CREDENTIAL_RE.search(hay):
         return "credential"
     for key in NEVER_AUTOFILL:
@@ -227,6 +241,11 @@ def classify(label: str, attrs: dict[str, str]) -> str:
         return "email"
     if ac in ("tel", "tel-national"):
         return "phone"
+    # The visible label is the strongest signal, and anchored rules like
+    # `^name$` only make sense against it rather than the joined haystack.
+    for name, pattern in RULES:
+        if label_only and pattern.search(label_only):
+            return name
     for name, pattern in RULES:
         if pattern.search(hay):
             return name

@@ -35,8 +35,14 @@ class GreenhouseFiller(ATSFiller):
 
     @classmethod
     def matches_page(cls, page: Any) -> bool:
-        for sel in ("#grnhse_app", "form#application-form", "div#application_form",
-                    "[data-mapped='true'][id^='greenhouse']"):
+        # Only greenhouse-specific markers. `form#application-form` on its own
+        # is far too common - SmartRecruiters uses that id too.
+        for sel in (
+            "#grnhse_app",
+            "iframe[src*='greenhouse.io']",
+            "input[name^='job_application']",
+            "[data-mapped='true'][id^='greenhouse']",
+        ):
             try:
                 if page.locator(sel).first.count():
                     return True
@@ -46,7 +52,7 @@ class GreenhouseFiller(ATSFiller):
             html = page.content()[:200000].lower()
         except Exception:
             return False
-        return "greenhouse.io" in html and "application" in html
+        return "greenhouse.io" in html
 
     def frame_scope(self) -> Any:
         """Greenhouse embeds live in an iframe; work inside it when present."""

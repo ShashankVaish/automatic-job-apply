@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Careers - Fixture Startup</title></head>
+<body>
+<!-- A plain company career page behind an Apply button. -->
+<h1>Junior Developer</h1>
+<p>Fixture Startup is looking for a junior developer. React, Node and SQL.
+Freshers welcome, 0-1 years of experience. Noida or remote.</p>
+<button id="show-form">Apply now</button>
+
+<div id="form-wrap" style="display:none">
+  <form action="/careers/apply" method="post" enctype="multipart/form-data">
+    <p><label for="g-name">Your name</label><input id="g-name" name="fullname" type="text" required></p>
+    <p><label for="g-email">Email address</label><input id="g-email" name="email" type="email" required></p>
+    <p><label for="g-phone">Contact number</label><input id="g-phone" name="mobile" type="tel"></p>
+    <p><label for="g-cv">Attach your CV</label><input id="g-cv" name="cv" type="file"></p>
+    <p><label for="g-link">Link to your resume</label><input id="g-link" name="resume_link" type="text"></p>
+    <p><label for="g-exp">Total experience (years)</label><input id="g-exp" name="exp" type="number"></p>
+    <p><label for="g-notice">Notice period</label><input id="g-notice" name="notice" type="text"></p>
+    <p><label for="g-extra">Anything else you'd like us to know?</label>
+       <textarea id="g-extra" name="extra"></textarea></p>
+    <p><button type="submit">Send application</button></p>
+  </form>
+</div>
+<script>
+document.getElementById('show-form').addEventListener('click', function () {
+  document.getElementById('form-wrap').style.display = 'block';
+});
+</script>
+</body></html>

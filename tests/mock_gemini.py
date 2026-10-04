@@ -130,7 +130,7 @@ class MockGemini:
                     confident=immediate,
                     note="" if immediate else "profile notice period is not immediate",
                 )
-            if "relocate" in q:
+            if "relocate" in q or "on-site" in q or "onsite" in q or "from office" in q:
                 return AnswerResult(
                     kind=field_kind, value=pick("yes" if p.willing_to_relocate else "no")
                 )

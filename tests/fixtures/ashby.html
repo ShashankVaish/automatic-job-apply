@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Software Engineer Intern - Fixture Labs</title></head>
+<body>
+<!-- Mimics a jobs.ashbyhq.com application form (React, listbox selects). -->
+<div class="ashby-job-posting-right-pane">
+  <h1>Software Engineer Intern</h1>
+  <p>Work with React and Python at Fixture Labs. 0-1 years of experience.</p>
+</div>
+<div class="ashby-application-form-container">
+  <form class="ashby-application-form">
+    <div class="ashby-application-form-field-entry">
+      <label for="a-name">Name<span>*</span></label>
+      <input id="a-name" type="text">
+    </div>
+    <div class="ashby-application-form-field-entry">
+      <label for="a-email">Email<span>*</span></label>
+      <input id="a-email" type="email">
+    </div>
+    <div class="ashby-application-form-field-entry">
+      <label for="a-phone">Phone</label>
+      <input id="a-phone" type="tel">
+    </div>
+    <div class="ashby-application-form-field-entry">
+      <label for="a-resume">Resume<span>*</span></label>
+      <input id="a-resume" type="file">
+    </div>
+    <div class="ashby-application-form-field-entry">
+      <label for="a-linkedin">LinkedIn</label>
+      <input id="a-linkedin" type="text">
+    </div>
+    <div class="ashby-application-form-field-entry">
+      <label for="a-github">GitHub</label>
+      <input id="a-github" type="text">
+    </div>
+    <div class="ashby-application-form-field-entry">
+      <label id="lbl-auth">Are you legally authorized to work in India?</label>
+      <button type="button" id="auth-listbox" aria-haspopup="listbox" aria-labelledby="lbl-auth">Select...</button>
+      <ul id="auth-options" role="listbox" style="display:none">
+        <li role="option">Yes</li>
+        <li role="option">No</li>
+      </ul>
+    </div>
+    <div class="ashby-application-form-field-entry">
+      <label for="a-why">Why do you want to work here?</label>
+      <textarea id="a-why"></textarea>
+    </div>
+    <button type="submit">Submit Application</button>
+  </form>
+</div>
+<script>
+var btn = document.getElementById('auth-listbox');
+var list = document.getElementById('auth-options');
+btn.addEventListener('click', function () { list.style.display = 'block'; });
+list.addEventListener('click', function (e) {
+  if (e.target.getAttribute('role') === 'option') {
+    btn.textContent = e.target.textContent;
+    list.style.display = 'none';
+  }
+});
+</script>
+</body></html>

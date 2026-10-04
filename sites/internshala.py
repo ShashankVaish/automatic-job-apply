@@ -71,6 +71,7 @@ POPUPS = [
 class Internshala(JobSource):
     name = "internshala"
     base_url = "https://internshala.com"
+    board_host = "internshala.com"
     has_own_apply_flow = True
 
     # ------------------------------------------------------------- searching
@@ -244,7 +245,7 @@ class Internshala(JobSource):
 
         for sel in self.MAYBE_EXTERNAL:
             href = self.attr_of(sel, "href")
-            if href and self.is_external(href, "internshala.com"):
+            if href and self.off_board(href):
                 log.info("Internshala posting links out to %s", href)
                 return href
         return ""
