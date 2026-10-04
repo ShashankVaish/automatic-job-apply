@@ -1,0 +1,137 @@
+# ---------------------------------------------------------------------------
+# Copy this file to config.yaml and fill in everything in [square brackets].
+# Nothing about you is hard-coded anywhere else in the project.
+# ---------------------------------------------------------------------------
+
+profile:
+  name: "[your name]"
+  email: "[your email]"
+  phone: "[your phone]"            # include country code, e.g. +91 98765 43210
+
+  location: "[city]"
+  open_to_remote: true             # [yes/no]
+  willing_to_relocate: true        # [yes/no]
+
+  graduation_year: 2026            # [fill in]
+  degree: "[e.g. B.Tech Computer Science]"
+  college: "[your college]"
+
+  experience_level: "fresher"      # [fresher / intern / 0-1 years]
+  years_of_experience: 0           # a number, for forms that demand one
+
+  expected_salary: "[e.g. 6 LPA]"
+  expected_stipend: "[e.g. 20000/month]"
+  notice_period: "[e.g. Immediate]"
+
+  linkedin: "[https://linkedin.com/in/you]"
+  github: "[https://github.com/you]"
+  portfolio: "[https://you.dev]"
+
+  # Legal-work-authorisation answers for forms that ask.
+  work_authorization: "Authorized to work in India without sponsorship"
+  requires_sponsorship: false
+
+  target_roles:
+    - "[Software Engineer Intern]"
+    - "[Frontend Developer]"
+    - "[Data Analyst Intern]"
+
+  target_locations:
+    - "[Delhi NCR]"
+    - "[Noida]"
+    - "[Gurugram]"
+    - "[Bangalore]"
+    - "Remote"
+
+  skills:
+    - "[Python]"
+    - "[JavaScript]"
+    - "[React]"
+    - "[SQL]"
+
+# Resume variants. Gemini picks the best one per job from focus_keywords +
+# the job description. pdf_path is uploaded to file inputs; public_link is
+# pasted into "resume link" / portfolio / website / additional-info boxes.
+resumes:
+  - name: "frontend"
+    pdf_path: "./resumes/frontend.pdf"
+    public_link: "[https://drive.google.com/file/d/..../view?usp=sharing]"
+    focus_keywords: ["react", "javascript", "typescript", "ui", "frontend", "css"]
+  - name: "data"
+    pdf_path: "./resumes/data.pdf"
+    public_link: "[https://drive.google.com/file/d/..../view?usp=sharing]"
+    focus_keywords: ["sql", "python", "pandas", "analytics", "data", "powerbi"]
+  - name: "general"
+    pdf_path: "./resumes/general.pdf"
+    public_link: "[https://drive.google.com/file/d/..../view?usp=sharing]"
+    focus_keywords: ["software", "backend", "fullstack", "engineer", "intern"]
+
+browser:
+  # "persistent" -> Playwright owns a profile in ./browser_profile
+  # "cdp"        -> attach to Chrome you started with start_chrome.bat/.sh
+  mode: "persistent"
+  persistent_profile_dir: "./browser_profile"
+  cdp_url: "http://localhost:9222"
+  slow_mo_ms: 120
+  nav_timeout_ms: 45000
+
+matching:
+  match_threshold: 70        # skip jobs scoring below this
+  auto_threshold: 80         # --auto only submits at/above this (career pages only)
+  dedupe_days: 30            # same company+title inside this window = duplicate
+
+sources:
+  linkedin:
+    enabled: true
+    keywords: ["Software Engineer Intern", "Frontend Developer Intern"]
+    locations: ["Noida, India", "Remote"]
+    max_jobs_per_search: 25
+    date_posted: "week"      # day | week | month | any
+  internshala:
+    enabled: true
+    keywords: ["computer science", "web development", "data science"]
+    locations: ["delhi-ncr", "work-from-home"]
+    max_jobs_per_search: 30
+  naukri:
+    enabled: false
+    keywords: ["software developer fresher"]
+    locations: ["Noida", "Bangalore"]
+    max_jobs_per_search: 20
+    experience_years: 0
+  indeed:
+    enabled: false
+    keywords: ["software engineer intern"]
+    locations: ["Noida, Uttar Pradesh", "Remote"]
+    max_jobs_per_search: 20
+
+limits:
+  daily:
+    linkedin: 15
+    naukri: 15
+    indeed: 20
+    internshala: 25
+    career_pages: 40
+  run_window:
+    timezone: "Asia/Kolkata"
+    start_hour: 9             # 09:00
+    end_hour: 21              # 21:00
+    enforce: true             # set false to bypass the window check
+  delays:
+    action_min_s: 3
+    action_max_s: 10
+    between_apps_min_s: 45
+    between_apps_max_s: 120
+
+email:
+  drafts_dir: "./drafts"
+  gmail_api: false            # true = also create a Gmail draft (never sends)
+
+followups:
+  days_after: 6
+  csv_path: "./followups.csv"
+
+paths:
+  db: "./data/applications.db"
+  logs_dir: "./logs"
+  screenshots_dir: "./screenshots"
+  applications_csv: "./applications.csv"

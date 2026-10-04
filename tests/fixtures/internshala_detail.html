@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Frontend Development Internship at Fixture Web Studio</title></head>
+<body>
+<!-- Internshala detail page with its own in-site apply modal. -->
+<h1 class="heading_4_5 profile_on_detail_page">Frontend Development Internship</h1>
+<div class="company_name"><a class="link_display_like_text">Fixture Web Studio</a></div>
+<div id="location_names"><span><a>Work From Home</a></span></div>
+<span class="stipend">15,000 /month</span>
+<div class="status-success"><span>Posted 2 days ago</span></div>
+
+<div class="internship_details">
+  <div class="text-container">
+    <h4>About the work from home job/internship</h4>
+    <p>Selected intern's day-to-day responsibilities include building responsive
+    user interfaces with React and JavaScript, writing clean CSS, and working
+    with our design team on the component library.</p>
+    <h4>Skill(s) required</h4>
+    <p>React, JavaScript, CSS, HTML</p>
+    <h4>Who can apply</h4>
+    <p>Only those candidates can apply who are available for a full time work
+    from home internship, can start between now and next month, and are in their
+    final year or recently graduated. 0-1 years of experience.</p>
+  </div>
+</div>
+
+<button class="apply_now_cta">Apply now</button>
+
+<div id="application_form" style="display:none">
+  <div class="assessment_question">
+    <label for="q1">Why should you be hired for this role?</label>
+    <textarea id="q1" name="cover_letter" rows="5"></textarea>
+  </div>
+  <div class="assessment_question">
+    <label for="q2">Are you available for a full time internship?</label>
+    <select id="q2" name="availability">
+      <option value="">Select</option>
+      <option>Yes</option>
+      <option>No</option>
+    </select>
+  </div>
+  <div class="assessment_question">
+    <label for="q3">Confirm your contact number</label>
+    <input type="tel" id="q3" name="phone">
+  </div>
+  <button id="submit" type="submit">Submit application</button>
+</div>
+
+<script>
+document.querySelector('.apply_now_cta').addEventListener('click', function () {
+  document.getElementById('application_form').style.display = 'block';
+});
+</script>
+</body>
+</html>

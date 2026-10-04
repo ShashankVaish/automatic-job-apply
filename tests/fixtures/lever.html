@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Data Analyst Intern - Fixture Analytics | Lever</title>
+</head>
+<body>
+<!-- Mimics a jobs.lever.co posting page with the apply form below it. -->
+<div class="posting-headline">
+  <h2>Data Analyst Intern</h2>
+  <div class="posting-categories">
+    <span class="sort-by-location posting-category">Remote</span>
+    <span class="sort-by-commitment posting-category">Internship</span>
+  </div>
+</div>
+
+<div class="section page-centered">
+  <p>Fixture Analytics is hiring a data analyst intern. You will write SQL,
+  build dashboards and work with Python and pandas to answer product questions.
+  Suitable for a final-year student or recent graduate. 0-1 years experience.</p>
+</div>
+
+<div class="postings-btn-wrapper">
+  <a class="postings-btn" href="#apply">Apply for this job</a>
+</div>
+
+<div class="application-page" id="apply">
+  <form class="application-form" method="POST" enctype="multipart/form-data" action="/apply">
+    <div class="application-question">
+      <label class="application-label">
+        <span class="text">Full name</span><span class="required">✱</span>
+      </label>
+      <input type="text" name="name" required>
+    </div>
+
+    <div class="application-question">
+      <label class="application-label"><span class="text">Email</span><span class="required">✱</span></label>
+      <input type="email" name="email" required>
+    </div>
+
+    <div class="application-question">
+      <label class="application-label"><span class="text">Phone</span></label>
+      <input type="tel" name="phone">
+    </div>
+
+    <div class="application-question">
+      <label class="application-label"><span class="text">Current company</span></label>
+      <input type="text" name="org">
+    </div>
+
+    <div class="application-question">
+      <label class="application-label"><span class="text">Resume/CV</span><span class="required">✱</span></label>
+      <input type="file" name="resume" accept=".pdf,.doc,.docx">
+    </div>
+
+    <div class="application-question">
+      <label class="application-label"><span class="text">LinkedIn URL</span></label>
+      <input type="text" name="urls[LinkedIn]">
+    </div>
+
+    <div class="application-question">
+      <label class="application-label"><span class="text">GitHub URL</span></label>
+      <input type="text" name="urls[GitHub]">
+    </div>
+
+    <div class="application-question">
+      <label class="application-label"><span class="text">Portfolio URL</span></label>
+      <input type="text" name="urls[Portfolio]">
+    </div>
+
+    <div class="application-question">
+      <label class="application-label"><span class="text">Other website</span></label>
+      <input type="text" name="urls[Other]">
+    </div>
+
+    <div class="application-question custom-question">
+      <label class="application-label">
+        <span class="text">Are you comfortable writing SQL?</span>
+      </label>
+      <div class="application-field">
+        <ul class="choices">
+          <li><label><input type="radio" name="cards[sql][field0]" value="Yes"> Yes</label></li>
+          <li><label><input type="radio" name="cards[sql][field0]" value="No"> No</label></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="application-question custom-question">
+      <label class="application-label">
+        <span class="text">Expected monthly stipend (INR)</span>
+      </label>
+      <input type="text" name="cards[stipend][field0]">
+    </div>
+
+    <div class="application-question custom-question">
+      <label class="application-label">
+        <span class="text">When can you start?</span>
+      </label>
+      <select name="cards[start][field0]">
+        <option value="">Select an option</option>
+        <option>Immediately</option>
+        <option>In 1 month</option>
+        <option>In 3 months</option>
+      </select>
+    </div>
+
+    <div class="application-question">
+      <label class="application-label"><span class="text">Additional information</span></label>
+      <textarea name="comments" rows="6"></textarea>
+    </div>
+
+    <div class="application-question">
+      <button type="submit" class="template-btn-submit">Submit application</button>
+    </div>
+  </form>
+</div>
+</body>
+</html>

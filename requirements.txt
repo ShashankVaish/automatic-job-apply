@@ -1,0 +1,9 @@
+playwright>=1.47
+google-genai>=0.3.0
+pydantic>=2.7
+python-dotenv>=1.0
+PyYAML>=6.0
+tenacity>=8.2
+rich>=13.7
+google-api-python-client>=2.140
+google-auth-oauthlib>=1.2

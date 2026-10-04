@@ -1,0 +1,15 @@
+.env
+config.yaml
+browser_profile/
+chrome_bot_profile/
+data/
+logs/
+screenshots/
+drafts/
+resumes/*.pdf
+applications.csv
+followups.csv
+credentials.json
+__pycache__/
+*.pyc
+.venv/
