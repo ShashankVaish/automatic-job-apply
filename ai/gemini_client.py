@@ -298,7 +298,140 @@ class GeminiClient:
             draft.body = draft.body.rstrip() + "\n\nResume: " + resume_link
         return draft
 
-    # ------------------------------------------------------ 5. follow-ups
+    # -------------------------------------------- 5. cold email outreach
+
+    def outreach_email(
+        self,
+        *,
+        company: str,
+        role: str,
+        contact_name: str = "",
+        company_context: str = "",
+        resume_link: str = "",
+    ) -> EmailDraft:
+        """A cold introduction email. No job posting required.
+
+        This is a stranger's inbox, so the prompt is stricter than the
+        application prompt: short, specific, no flattery, no fabricated
+        knowledge about the company, and an easy opt-out.
+        """
+        greeting = "Hi " + contact_name if contact_name else "Hello"
+        prompt = (
+            "Write a short cold outreach email from a job seeker to someone at a "
+            "company that has not advertised a role.\n\n"
+            + HONESTY_RULE
+            + "\nCANDIDATE PROFILE:\n"
+            + self.cfg.profile.as_prompt_block()
+            + "\n\nCOMPANY: "
+            + company
+            + "\nROLE THEY ARE INTERESTED IN: "
+            + (role or "any suitable entry-level role")
+            + "\nCONTACT NAME: "
+            + (contact_name or "(unknown - use a neutral greeting)")
+            + "\nWHAT WE KNOW ABOUT THE COMPANY (may be empty):\n"
+            + _truncate(company_context, 3000)
+            + "\n\nHard requirements:\n"
+            "- subject: under 60 characters, specific, no clickbait, no ALL CAPS.\n"
+            "- body: 90 to 140 words, 5 to 8 short lines, plain text.\n"
+            "- Open with '" + greeting + ",'.\n"
+            "- Say in one line who the candidate is and what they are looking for.\n"
+            "- Give two concrete, truthful specifics from the profile (skills or "
+            "degree). Never invent projects, metrics, employers or achievements.\n"
+            "- Say nothing about the company that is not in the context above. If "
+            "the context is empty, do not pretend to know their product.\n"
+            "- No flattery ('huge fan', 'love what you're building'), no hype, no "
+            "buzzwords, no emoji, no exclamation marks.\n"
+            "- One clear ask: a short conversation or whether they are hiring.\n"
+            "- Include a one-line polite opt-out, e.g. 'If this isn't the right "
+            "time, no problem at all.'\n"
+            "- Second-to-last line must be: Resume: " + resume_link + "\n"
+            "- Sign off with the candidate's name, phone and email.\n"
+            '\nReply as JSON: {"subject": "...", "body": "..."}'
+        )
+        draft = self._ask(prompt, EmailDraft, temperature=0.5)
+        if resume_link and resume_link not in draft.body:
+            draft.body = draft.body.rstrip() + "\n\nResume: " + resume_link
+        return draft
+
+    def outreach_followup(
+        self,
+        *,
+        company: str,
+        role: str,
+        contact_name: str,
+        first_contacted: str,
+        stage: int,
+        resume_link: str = "",
+    ) -> EmailDraft:
+        """Follow-up 1 or 2 on a cold email that got no reply."""
+        tone = (
+            "This is the FIRST follow-up. Keep it to 3 or 4 short lines: a one-line "
+            "reminder of the original email with its date, one new truthful detail "
+            "from the profile, and the same light ask."
+            if stage <= 1
+            else "This is the SECOND and FINAL follow-up. Keep it to 3 lines, say "
+            "explicitly that this is the last time you'll reach out, and leave the "
+            "door open without any guilt-tripping."
+        )
+        prompt = (
+            "Write a follow-up to a cold outreach email that received no reply.\n\n"
+            + HONESTY_RULE
+            + "\nCANDIDATE PROFILE:\n"
+            + self.cfg.profile.as_prompt_block()
+            + "\n\nCOMPANY: "
+            + company
+            + "\nROLE: "
+            + (role or "any suitable entry-level role")
+            + "\nCONTACT NAME: "
+            + (contact_name or "(unknown)")
+            + "\nFIRST CONTACTED: "
+            + first_contacted
+            + "\nFOLLOW-UP NUMBER: "
+            + str(max(1, stage))
+            + "\n\n"
+            + tone
+            + "\n- subject: reply-style, e.g. 'Re: <original topic>'.\n"
+            "- No pressure, no guilt, no 'just bumping this to the top of your "
+            "inbox', no implication that they were rude not to reply.\n"
+            "- Last line must be: Resume: " + resume_link + "\n"
+            '\nReply as JSON: {"subject": "...", "body": "..."}'
+        )
+        draft = self._ask(prompt, EmailDraft, temperature=0.45)
+        if resume_link and resume_link not in draft.body:
+            draft.body = draft.body.rstrip() + "\n\nResume: " + resume_link
+        return draft
+
+    def pick_resume_for_company(self, *, company: str, role: str, context: str) -> str:
+        """Choose a resume variant for outreach, where there is no job post."""
+        variants = [
+            {"name": r.name, "focus_keywords": r.focus_keywords} for r in self.cfg.resumes
+        ]
+        prompt = (
+            "Pick the best resume variant to attach to a cold outreach email.\n\n"
+            + HONESTY_RULE
+            + "\nCANDIDATE SKILLS: "
+            + ", ".join(self.cfg.profile.skills)
+            + "\nTARGET ROLES: "
+            + ", ".join(self.cfg.profile.target_roles)
+            + "\n\nVARIANTS:\n"
+            + json.dumps(variants, indent=2)
+            + "\n\nCOMPANY: "
+            + company
+            + "\nROLE OF INTEREST: "
+            + (role or "any suitable entry-level role")
+            + "\nCONTEXT:\n"
+            + _truncate(context, 2000)
+            + "\n\nReply as JSON with a score of 100 and the chosen variant: "
+            '{"match_score": 100, "best_resume": "<variant name>", '
+            '"reason": "...", "red_flags": []}'
+        )
+        result = self._ask(prompt, MatchResult)
+        known = {r.name.lower() for r in self.cfg.resumes}
+        if result.best_resume.lower() not in known:
+            return self.cfg.resumes[0].name
+        return result.best_resume
+
+    # ------------------------------------------------------ 6. follow-ups
 
     def follow_up(
         self, *, title: str, company: str, applied_on: str, channel: str = "email"

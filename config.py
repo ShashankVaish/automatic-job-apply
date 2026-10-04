@@ -152,6 +152,16 @@ class EmailCfg(BaseModel):
     gmail_api: bool = False
 
 
+class OutreachCfg(BaseModel):
+    enabled: bool = True
+    outbox_dir: str = "./outbox"
+    companies_csv: str = "./inputs/companies.csv"
+    job_urls: str = "./inputs/job_urls.txt"
+    dedupe_days: int = 90
+    max_followups: int = 2
+    follow_contact_page: bool = True
+
+
 class FollowupCfg(BaseModel):
     days_after: int = 6
     csv_path: str = "./followups.csv"
@@ -172,6 +182,7 @@ class Config(BaseModel):
     sources: dict[str, SourceCfg] = Field(default_factory=dict)
     limits: LimitsCfg = Field(default_factory=LimitsCfg)
     email: EmailCfg = Field(default_factory=EmailCfg)
+    outreach: OutreachCfg = Field(default_factory=OutreachCfg)
     followups: FollowupCfg = Field(default_factory=FollowupCfg)
     paths: PathsCfg = Field(default_factory=PathsCfg)
 

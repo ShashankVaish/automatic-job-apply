@@ -142,13 +142,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fill one specific application URL instead of searching. "
         "Accepts a file:// path, so it works against tests/fixtures/.",
     )
-    p.add_argument(
+    tasks = p.add_argument_group("one-off tasks")
+    tasks.add_argument(
         "--followups",
         action="store_true",
         help="Draft follow-ups for applications with no reply, then exit",
     )
-
-    tasks = p.add_argument_group("one-off tasks")
     tasks.add_argument(
         "--check",
         action="store_true",
@@ -165,6 +164,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tasks.add_argument(
         "--export", action="store_true", help="Write applications.csv and exit"
+    )
+
+    out = p.add_argument_group("cold email outreach (never sends)")
+    out.add_argument(
+        "--outreach",
+        action="store_true",
+        help="Draft cold emails from inputs/companies.csv and inputs/job_urls.txt",
+    )
+    out.add_argument(
+        "--outreach-followups",
+        action="store_true",
+        help="Draft follow-ups for cold emails that got no reply",
+    )
+    out.add_argument(
+        "--outreach-report", action="store_true", help="Show outreach activity and exit"
     )
 
     p.set_defaults(mode="assist")
@@ -428,6 +442,151 @@ def cmd_followups(cfg: Config, db: Database) -> int:
     return 0
 
 
+# -------------------------------------------------------------- outreach
+
+
+def cmd_outreach(cfg: Config, db: Database, args) -> int:
+    from ai.gemini_client import GeminiClient
+    from browser.launcher import BrowserSession
+    from limits import now_in_window
+    from outreach import OutreachStats, draft_outreach, load_targets
+
+    if not cfg.outreach.enabled:
+        console.print("[yellow]Outreach is disabled[/] (outreach.enabled in config.yaml)")
+        return 0
+
+    if not args.ignore_run_window:
+        ok, why = now_in_window(cfg)
+        if not ok:
+            console.print("[red]Outside the run window.[/] " + why)
+            return 2
+
+    targets = load_targets(
+        cfg, csv_path=cfg.outreach.companies_csv, urls_path=cfg.outreach.job_urls
+    )
+    if not targets:
+        console.print(
+            "[yellow]No outreach targets.[/] "
+            "Copy [bold]inputs/companies.example.csv[/] to [bold]inputs/companies.csv[/] "
+            "and/or [bold]inputs/job_urls.example.txt[/] to [bold]inputs/job_urls.txt[/], "
+            "then fill them in."
+        )
+        return 0
+
+    console.print(
+        "Drafting cold emails for {0} target(s). "
+        "[bold]Nothing is sent[/] - drafts land in ./outbox/.".format(len(targets))
+    )
+
+    gemini = GeminiClient(cfg)
+    needs_browser = any(t.source == "job_url" for t in targets)
+    stats: OutreachStats
+
+    if needs_browser:
+        with BrowserSession(cfg) as session:
+            stats = draft_outreach(
+                cfg, db, gemini, targets,
+                page=session.new_page(),
+                limit=args.max,
+                dedupe_days=cfg.outreach.dedupe_days,
+            )
+    else:
+        stats = draft_outreach(
+            cfg, db, gemini, targets,
+            limit=args.max,
+            dedupe_days=cfg.outreach.dedupe_days,
+        )
+
+    table = Table(title="Outreach drafted (not sent)", box=box.ASCII)
+    for col in ("targets", "drafted", "skipped", "no address", "failed"):
+        table.add_column(col, justify="right", no_wrap=True)
+    table.add_row(
+        str(stats.found),
+        str(stats.drafted),
+        str(stats.skipped),
+        str(stats.needs_email),
+        str(stats.failed),
+    )
+    console.print(table)
+    for note in stats.notes[:15]:
+        console.print("[yellow]note:[/] " + note)
+    if stats.drafted:
+        console.print(
+            "Read the drafts in [bold]{0}[/] and send the ones you want "
+            "yourself.".format(cfg.abs_path(cfg.outreach.outbox_dir))
+        )
+    return 0
+
+
+def cmd_outreach_followups(cfg: Config, db: Database) -> int:
+    from ai.gemini_client import GeminiClient
+    from outreach import draft_outreach_followups
+
+    if cfg.outreach.max_followups <= 0:
+        console.print("[yellow]Outreach follow-ups are disabled[/] (max_followups: 0)")
+        return 0
+
+    rows = draft_outreach_followups(
+        cfg, db, GeminiClient(cfg), max_stage=cfg.outreach.max_followups
+    )
+    if not rows:
+        console.print(
+            "[yellow]No outreach is due a follow-up[/] "
+            "(due {0} days after the last contact).".format(cfg.followups.days_after)
+        )
+        return 0
+
+    table = Table(title="Outreach follow-ups drafted (not sent)", box=box.ASCII)
+    table.add_column("stage", no_wrap=True)
+    table.add_column("company", overflow="fold")
+    table.add_column("email", overflow="fold")
+    table.add_column("first contacted", no_wrap=True)
+    for r in rows:
+        table.add_row(r["stage"], r["company"], r["email"], r["first_contacted"])
+    console.print(table)
+    console.print("Drafts are in [bold]{0}[/].".format(cfg.abs_path(cfg.outreach.outbox_dir)))
+    return 0
+
+
+def cmd_outreach_report(cfg: Config, db: Database, days: int) -> int:
+    rows = db.outreach_rows(days)
+    if not rows:
+        console.print("[yellow]No outreach in the last {0} days.[/]".format(days))
+        return 0
+
+    table = Table(title="Cold outreach, last {0} days".format(days), box=box.ASCII)
+    table.add_column("date", no_wrap=True, min_width=10)
+    table.add_column("company", overflow="fold", min_width=14)
+    table.add_column("email", overflow="fold")
+    table.add_column("resume", no_wrap=True)
+    table.add_column("f/ups", justify="right", no_wrap=True)
+    table.add_column("status", no_wrap=True)
+    for r in rows[:60]:
+        colour = {
+            "drafted": "cyan",
+            "needs_email": "yellow",
+            "skipped": "dim",
+            "failed": "red",
+        }.get(r["status"], "white")
+        table.add_row(
+            r["date"],
+            clip(r["company"], 28),
+            "" if r["status"] == "needs_email" else clip(r["email"], 30),
+            r["resume_variant"] or "-",
+            str(r["followup_stage"]),
+            "[{0}]{1}[/]".format(colour, r["status"]),
+        )
+    console.print(table)
+    drafted = sum(1 for r in rows if r["status"] == "drafted")
+    console.print(
+        "{0} drafted, {1} waiting on an address. "
+        "[bold]Nothing has been sent by this tool.[/]".format(
+            drafted, sum(1 for r in rows if r["status"] == "needs_email")
+        )
+    )
+    return 0
+
+
 # ---------------------------------------------------------------- the run
 
 
@@ -599,7 +758,9 @@ def main(argv: list[str] | None = None) -> int:
     # Only the apply loop needs a complete config and a working API key.
     # --check reports problems itself; --report/--export/--login are offline or
     # don't touch Gemini, and should work before the profile is filled in.
-    offline = args.check or args.report or args.export or args.login
+    offline = (
+        args.check or args.report or args.export or args.login or args.outreach_report
+    )
     cfg = load_config(args.config, strict=not offline)
     log_path = setup_logging(cfg, args.verbose)
     db = open_db(cfg.abs_path(cfg.paths.db))
@@ -613,6 +774,12 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_export(cfg, db)
         if args.followups:
             return cmd_followups(cfg, db)
+        if args.outreach_report:
+            return cmd_outreach_report(cfg, db, args.report_days)
+        if args.outreach:
+            return cmd_outreach(cfg, db, args)
+        if args.outreach_followups:
+            return cmd_outreach_followups(cfg, db)
 
         sites = selected_sites(cfg, args.site)
         if args.login:

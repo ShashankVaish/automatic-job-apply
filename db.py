@@ -38,6 +38,28 @@ CREATE TABLE IF NOT EXISTS site_blocks (
     reason  TEXT,
     PRIMARY KEY (site, date)
 );
+
+-- Cold email outreach. One row per company+email we have drafted to.
+CREATE TABLE IF NOT EXISTS outreach (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    date            TEXT NOT NULL,            -- when the first draft was made
+    created_at      TEXT NOT NULL,
+    company         TEXT NOT NULL,
+    role            TEXT,                     -- role we are pitching for
+    contact_name    TEXT,
+    email           TEXT NOT NULL,
+    source          TEXT,                     -- csv | page | job_url
+    source_url      TEXT,
+    resume_variant  TEXT,
+    status          TEXT NOT NULL,            -- drafted | skipped | failed | needs_email
+    draft_path      TEXT,
+    note            TEXT,
+    followup_stage  INTEGER NOT NULL DEFAULT 0,
+    last_contact    TEXT                      -- date of the latest draft
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_outreach_email ON outreach(email);
+CREATE INDEX IF NOT EXISTS idx_outreach_company ON outreach(company);
+CREATE INDEX IF NOT EXISTS idx_outreach_date ON outreach(date);
 """
 
 CSV_COLUMNS = [
@@ -218,6 +240,116 @@ class Database:
         return self.conn.execute(
             "SELECT * FROM applications ORDER BY date, id"
         ).fetchall()
+
+    # -------------------------------------------------------------- outreach
+
+    def outreach_seen(self, email: str) -> sqlite3.Row | None:
+        """Have we already drafted to this address? Stops repeat cold emails."""
+        return self.conn.execute(
+            "SELECT * FROM outreach WHERE lower(email)=lower(?)", (email,)
+        ).fetchone()
+
+    def outreach_company_seen(self, company: str, within_days: int) -> sqlite3.Row | None:
+        cutoff = (date.today() - timedelta(days=within_days)).strftime("%Y-%m-%d")
+        rows = self.conn.execute(
+            "SELECT * FROM outreach WHERE date >= ? AND status='drafted'", (cutoff,)
+        ).fetchall()
+        target = _norm(company)
+        for row in rows:
+            if _norm(row["company"]) == target:
+                return row
+        return None
+
+    def record_outreach(
+        self,
+        *,
+        company: str,
+        email: str,
+        role: str = "",
+        contact_name: str = "",
+        source: str = "",
+        source_url: str = "",
+        resume_variant: str = "",
+        status: str = "drafted",
+        draft_path: str = "",
+        note: str = "",
+    ) -> int:
+        now = datetime.now()
+        today = now.strftime("%Y-%m-%d")
+        with self.conn:
+            cur = self.conn.execute(
+                """
+                INSERT INTO outreach
+                    (date, created_at, company, role, contact_name, email, source,
+                     source_url, resume_variant, status, draft_path, note, last_contact)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(email) DO UPDATE SET
+                    status=excluded.status,
+                    role=COALESCE(NULLIF(excluded.role,''), outreach.role),
+                    draft_path=COALESCE(NULLIF(excluded.draft_path,''), outreach.draft_path),
+                    note=excluded.note,
+                    last_contact=excluded.last_contact
+                """,
+                (
+                    today,
+                    now.isoformat(timespec="seconds"),
+                    company,
+                    role,
+                    contact_name,
+                    email,
+                    source,
+                    source_url,
+                    resume_variant,
+                    status,
+                    draft_path,
+                    note,
+                    today,
+                ),
+            )
+            return int(cur.lastrowid or 0)
+
+    def outreach_due_followup(self, days_after: int, max_stage: int = 2) -> list[sqlite3.Row]:
+        """Outreach drafted `days_after` days ago that hasn't had `max_stage`
+        follow-ups yet."""
+        cutoff = (date.today() - timedelta(days=days_after)).strftime("%Y-%m-%d")
+        return self.conn.execute(
+            """
+            SELECT * FROM outreach
+            WHERE status='drafted' AND followup_stage < ?
+              AND COALESCE(last_contact, date) <= ?
+            ORDER BY date
+            """,
+            (max_stage, cutoff),
+        ).fetchall()
+
+    def bump_outreach_followup(self, outreach_id: int) -> None:
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE outreach
+                SET followup_stage = followup_stage + 1, last_contact = ?
+                WHERE id = ?
+                """,
+                (date.today().strftime("%Y-%m-%d"), outreach_id),
+            )
+
+    def outreach_rows(self, days: int | None = None) -> list[sqlite3.Row]:
+        if days is None:
+            return self.conn.execute(
+                "SELECT * FROM outreach ORDER BY date DESC, id DESC"
+            ).fetchall()
+        cutoff = (date.today() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+        return self.conn.execute(
+            "SELECT * FROM outreach WHERE date >= ? ORDER BY date DESC, id DESC",
+            (cutoff,),
+        ).fetchall()
+
+    def count_outreach_today(self) -> int:
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM outreach WHERE last_contact=? AND status='drafted'",
+            (date.today().strftime("%Y-%m-%d"),),
+        ).fetchone()
+        return int(row["n"])
 
     # ---------------------------------------------------------------- export
 

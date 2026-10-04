@@ -124,6 +124,16 @@ def config_dict(tmp_path: Path) -> dict:
             },
         },
         "email": {"drafts_dir": str(tmp_path / "drafts"), "gmail_api": False},
+        "outreach": {
+            "enabled": True,
+            # Isolated per test, so no test can write into the real ./outbox.
+            "outbox_dir": str(tmp_path / "outbox"),
+            "companies_csv": "./inputs/companies.csv",
+            "job_urls": "./inputs/job_urls.txt",
+            "dedupe_days": 90,
+            "max_followups": 2,
+            "follow_contact_page": True,
+        },
         "followups": {"days_after": 6, "csv_path": str(tmp_path / "followups.csv")},
         "paths": {
             "db": str(tmp_path / "data" / "applications.db"),

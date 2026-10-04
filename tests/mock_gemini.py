@@ -242,6 +242,68 @@ class MockGemini:
             ),
         )
 
+    # ---------------------------------------------------- cold outreach
+
+    def pick_resume_for_company(self, *, company, role, context) -> str:
+        self._maybe_fail("pick_resume_for_company")
+        self.calls.append(("pick_resume_for_company", company))
+        text = " ".join([role or "", context or ""]).lower()
+        for variant in self.cfg.resumes:
+            if any(k.lower() in text for k in variant.focus_keywords):
+                return variant.name
+        return self.resume
+
+    def outreach_email(
+        self, *, company, role, contact_name="", company_context="", resume_link=""
+    ) -> EmailDraft:
+        self._maybe_fail("outreach_email")
+        self.calls.append(("outreach_email", company))
+        p = self.cfg.profile
+        greeting = ("Hi " + contact_name) if contact_name else "Hello"
+        return EmailDraft(
+            subject="{0} - {1}".format(role or "Entry-level role", p.name),
+            body="\n".join(
+                [
+                    greeting + ",",
+                    "",
+                    "I am a {0} in {1} from {2}, looking for {3} work.".format(
+                        p.experience_level, p.degree, p.college, role or "entry-level"
+                    ),
+                    "I work mainly with {0}.".format(", ".join(p.skills[:3])),
+                    "Would you have ten minutes to talk about openings at {0}?".format(
+                        company
+                    ),
+                    "If this isn't the right time, no problem at all.",
+                    "",
+                    "Resume: " + resume_link,
+                    "",
+                    "{0}\n{1} | {2}".format(p.name, p.phone, p.email),
+                ]
+            ),
+        )
+
+    def outreach_followup(
+        self, *, company, role, contact_name, first_contacted, stage, resume_link=""
+    ) -> EmailDraft:
+        self._maybe_fail("outreach_followup")
+        self.calls.append(("outreach_followup", company))
+        last = "This is the last time I'll reach out." if stage >= 2 else ""
+        lines = [
+            "Hello,",
+            "",
+            "I wrote on {0} about {1} roles at {2}.".format(
+                first_contacted, role or "entry-level", company
+            ),
+            "I'm still interested and happy to share more.",
+        ]
+        if last:
+            lines.append(last)
+        lines += ["", "Resume: " + resume_link]
+        return EmailDraft(
+            subject="Re: {0} - {1}".format(role or "Entry-level role", self.cfg.profile.name),
+            body="\n".join(lines),
+        )
+
     # --------------------------------------------------------- follow-ups
 
     def follow_up(self, *, title, company, applied_on, channel="email") -> str:

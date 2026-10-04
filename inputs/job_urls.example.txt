@@ -1,0 +1,8 @@
+# One URL per line. A careers page, a jobs page, or a single job post.
+# The page is read for the company name, the role, and any address the
+# company has published. Addresses are never guessed.
+#
+# Lines starting with # are ignored.
+#
+# https://fixturelabs.example/careers
+# https://fixtureanalytics.example/jobs/data-analyst-intern

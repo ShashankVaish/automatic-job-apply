@@ -1,0 +1,4 @@
+company,email,contact_name,role,website,notes
+Fixture Labs,careers@fixturelabs.example,,Frontend Developer Intern,https://fixturelabs.example,Met their engineer at a meetup
+Fixture Analytics,jobs@fixtureanalytics.example,Priya Nair,Data Analyst Intern,https://fixtureanalytics.example,
+Fixture Startup,,,Software Engineer Intern,https://fixturestartup.example,No public address - will be flagged needs_email
