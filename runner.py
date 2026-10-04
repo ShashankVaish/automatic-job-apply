@@ -390,8 +390,12 @@ class Runner:
 
         if self.mode == "dry-run":
             self.print_summary(job, match, report, mode_note="DRY RUN - nothing submitted")
-            return ApplyOutcome("applied", reason="dry run: form filled, not submitted",
-                                screenshot=shot, report=report)
+            return ApplyOutcome(
+                "needs_review",
+                reason="dry run: form filled, not submitted",
+                screenshot=shot,
+                report=report,
+            )
 
         submit = filler.submit_locator()
 

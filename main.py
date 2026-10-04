@@ -17,6 +17,7 @@ from pathlib import Path
 
 from rich import box
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from config import Config, load_config
@@ -72,8 +73,12 @@ def setup_logging(cfg: Config, verbose: bool = False) -> Path:
     stream.setFormatter(logging.Formatter("%(levelname)-7s %(message)s"))
     root.addHandler(stream)
 
-    # Playwright is extremely chatty at DEBUG.
+    # Playwright is extremely chatty at DEBUG, and the Gemini SDK logs an
+    # automatic-function-calling notice on every single call.
     logging.getLogger("playwright").setLevel(logging.WARNING)
+    for noisy in ("google_genai", "google_genai.models", "httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+    logging.getLogger("google_genai.models").setLevel(logging.ERROR)
     return log_path
 
 
@@ -214,9 +219,22 @@ def cmd_check(cfg: Config, db: Database) -> int:
         nonlocal ok
         if not good:
             ok = False
-        table.add_row(item, "[green]OK[/]" if good else "[red]FAIL[/]", detail)
+        # escape() because details carry real data - Windows paths and
+        # "[placeholder]" values that rich would otherwise read as markup.
+        table.add_row(item, "[green]OK[/]" if good else "[red]FAIL[/]", escape(detail))
 
-    row("config.yaml", True, "loaded for " + cfg.profile.name)
+    from config import _unfilled
+
+    placeholders = _unfilled(cfg)
+    row(
+        "config.yaml",
+        not placeholders,
+        "loaded for " + cfg.profile.name
+        if not placeholders
+        else "{0} field(s) still have [placeholder] values: {1}".format(
+            len(placeholders), ", ".join(placeholders[:6])
+        ),
+    )
     row("profile email", "@" in cfg.profile.email, cfg.profile.email)
     row("profile phone", bool(cfg.profile.phone.strip()), cfg.profile.phone)
     row(

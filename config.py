@@ -214,10 +214,44 @@ def _unfilled(cfg: Config) -> list[str]:
             if s.startswith("[") and s.endswith("]"):
                 bad.append(label)
 
-    for field in ("name", "email", "phone", "location", "degree", "college"):
+    # Every profile string that can end up typed into a real application form.
+    # A leftover "[https://github.com/you]" in a submitted form is worse than
+    # an empty field, so these are all checked.
+    for field in (
+        "name",
+        "email",
+        "phone",
+        "location",
+        "degree",
+        "college",
+        "linkedin",
+        "github",
+        "portfolio",
+        "expected_salary",
+        "expected_stipend",
+        "notice_period",
+    ):
         check("profile." + field, getattr(cfg.profile, field))
+
     for i, r in enumerate(cfg.resumes):
         check("resumes[{0}].public_link".format(i), r.public_link)
+
+    for key, values in (
+        ("target_roles", cfg.profile.target_roles),
+        ("target_locations", cfg.profile.target_locations),
+        ("skills", cfg.profile.skills),
+    ):
+        for j, value in enumerate(values):
+            check("profile.{0}[{1}]".format(key, j), value)
+
+    for name, source in cfg.sources.items():
+        if not source.enabled:
+            continue
+        for j, value in enumerate(source.keywords):
+            check("sources.{0}.keywords[{1}]".format(name, j), value)
+        for j, value in enumerate(source.locations):
+            check("sources.{0}.locations[{1}]".format(name, j), value)
+
     return bad
 
 

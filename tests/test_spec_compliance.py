@@ -486,3 +486,117 @@ def test_report_defaults_to_seven_days():
     from main import build_parser
 
     assert build_parser().parse_args(["--report"]).report_days == 7
+
+
+# ------------------------------------- placeholders must never be submitted
+
+
+def test_unreplaced_placeholders_are_rejected(tmp_path, monkeypatch):
+    """A leftover "[https://github.com/you]" must never reach a real form."""
+    import yaml
+
+    from config import load_config
+
+    raw = yaml.safe_load((ROOT / "config.yaml.example").read_text(encoding="utf-8"))
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    with pytest.raises(SystemExit) as excinfo:
+        load_config(path, strict=True)
+    message = str(excinfo.value)
+    for field in ("profile.linkedin", "profile.github", "profile.notice_period"):
+        assert field in message, field + " should be reported as unfilled"
+
+
+def test_every_submittable_profile_field_is_validated():
+    from config import _unfilled, Config
+
+    cfg = Config(
+        profile={
+            "name": "A B",
+            "email": "a@b.example",
+            "phone": "1",
+            "location": "X",
+            "degree": "D",
+            "college": "C",
+            "linkedin": "[link]",
+            "github": "[link]",
+            "portfolio": "[link]",
+            "expected_salary": "[pay]",
+            "expected_stipend": "[pay]",
+            "notice_period": "[when]",
+            "skills": ["[skill]"],
+            "target_roles": ["[role]"],
+            "target_locations": ["[place]"],
+        },
+        resumes=[{"name": "general", "pdf_path": "./x.pdf", "public_link": "[link]"}],
+    )
+    reported = _unfilled(cfg)
+    for field in (
+        "profile.linkedin",
+        "profile.github",
+        "profile.portfolio",
+        "profile.expected_salary",
+        "profile.expected_stipend",
+        "profile.notice_period",
+        "profile.skills[0]",
+        "profile.target_roles[0]",
+        "profile.target_locations[0]",
+        "resumes[0].public_link",
+    ):
+        assert field in reported, field
+
+
+def test_a_dry_run_is_never_recorded_as_applied(cfg, db, gemini):
+    """Regression: --url dry runs used to print "Outcome: applied"."""
+    from models import ApplyTarget, FillReport, Job
+    from runner import Runner
+    from limits import RunBudget
+
+    class NoSession:
+        def new_page(self):
+            raise AssertionError("not needed")
+
+    class FakePage:
+        url = "https://example.com/x"
+
+        def screenshot(self, **kwargs):
+            path = kwargs.get("path")
+            if path:
+                open(path, "wb").write(b"\x89PNG\r\n\x1a\n")
+
+        def inner_text(self, selector, timeout=0):
+            return "form"
+
+    class FakeFiller:
+        name = "greenhouse"
+
+        def submit_locator(self):
+            raise AssertionError("dry run must not look for a submit button")
+
+        def has_next_button(self):
+            return False
+
+        def confirmed(self):
+            return False
+
+    class FakeMatch:
+        match_score = 95
+        best_resume = "general"
+        reason = "fits"
+        red_flags: list[str] = []
+
+    runner = Runner(
+        cfg, db, gemini, NoSession(), mode="dry-run",
+        budget=RunBudget(cfg, db), skip_login=True,
+    )
+    job = Job(
+        site="career_pages", title="T", company="C",
+        url="https://example.com/x", apply_target=ApplyTarget.CAREER_PAGE,
+    )
+    outcome = runner.finish(
+        FakePage(), FakeFiller(), job, FakeMatch(), FillReport(), allow_auto=True
+    )
+    assert outcome.status != "applied"
+    assert "not submitted" in outcome.reason
