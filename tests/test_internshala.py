@@ -85,10 +85,30 @@ def test_routes_to_an_external_career_page(source, page):
     job = source.get_job_details(job)
 
     assert job.apply_target == ApplyTarget.CAREER_PAGE
-    assert job.external_url == "https://job-boards.greenhouse.io/fixturelabs/jobs/4001"
-    # The ATS is identified from the URL before we ever open it.
-    assert job.ats == "greenhouse"
+    # The fixture's "Apply on company website" link is followed, and the
+    # relative href resolves against the page we're on - not internshala.com.
+    assert job.external_url.endswith("greenhouse.html")
+    assert "internshala.com" not in job.external_url
     assert job.apply_url() == job.external_url
+
+
+def test_known_ats_hosts_are_identified_before_opening_them(source):
+    """route() labels the ATS from the URL alone, with no page load."""
+    job = Job(
+        site="internshala",
+        title="Software Engineer Intern",
+        company="Fixture Labs",
+        url="https://internshala.com/internship/detail/x",
+        description="A normal description with no apply email.",
+        external_url="https://job-boards.greenhouse.io/fixturelabs/jobs/4001",
+    )
+    routed = source.route(job)
+    assert routed.apply_target == ApplyTarget.CAREER_PAGE
+    assert routed.ats == "greenhouse"
+
+    job.external_url = "https://jobs.lever.co/fixture/abc"
+    job.ats = ""
+    assert source.route(job).ats == "lever"
 
 
 def test_routes_to_email_when_the_posting_says_to_email(source, page):

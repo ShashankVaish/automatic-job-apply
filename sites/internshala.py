@@ -220,24 +220,33 @@ class Internshala(JobSource):
         text = " ".join(chunks)
         return re.sub(r"\n{3,}", "\n\n", text).strip()
 
+    # A link with this wording is an external application by definition, so we
+    # trust the label rather than comparing hosts.
+    EXPLICIT_EXTERNAL = (
+        "a:has-text('Apply on company website')",
+        "a:has-text('Apply on company site')",
+        "a:has-text('company website')",
+    )
+    # These could be anything, so they only count if they leave internshala.com.
+    MAYBE_EXTERNAL = (
+        "div.internship_details a[href^='http']",
+        "div.text-container a[href^='http']",
+    )
+
     def _external_link(self) -> str:
         """Some Internshala postings point at the company's own form."""
-        for sel in (
-            "a:has-text('Apply on company website')",
-            "a:has-text('company website')",
-            "div.internship_details a[href^='http']",
-            "div.text-container a[href^='http']",
-        ):
-            try:
-                loc = self.page.locator(sel).first
-                if not loc.count():
-                    continue
-                href = (loc.get_attribute("href", timeout=2000) or "").strip()
-                if href and self.is_external(href, "internshala.com"):
-                    log.info("Internshala posting links out to %s", href)
-                    return href
-            except Exception:
-                continue
+        for sel in self.EXPLICIT_EXTERNAL:
+            href = self.attr_of(sel, "href")
+            if href:
+                resolved = self.absolute(href)
+                log.info("Internshala posting links out to %s", resolved)
+                return resolved
+
+        for sel in self.MAYBE_EXTERNAL:
+            href = self.attr_of(sel, "href")
+            if href and self.is_external(href, "internshala.com"):
+                log.info("Internshala posting links out to %s", href)
+                return href
         return ""
 
     # ----------------------------------------------------------- in-board apply

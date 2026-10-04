@@ -12,8 +12,8 @@ Last updated: 2026-10-04, overnight unattended run.
 | Stage | Scope | State |
 |---|---|---|
 | 1 | Config, database, Gemini client, browser launcher + manual login | DONE, verified |
-| 2 | Internshala + Greenhouse + Lever end to end in `--dry-run` | IN PROGRESS |
-| 3 | Assist mode (+ review mode) | not started |
+| 2 | Internshala + Greenhouse + Lever end to end in `--dry-run` | DONE, 48 tests pass |
+| 3 | Assist mode (+ review mode) | IN PROGRESS |
 | 4 | LinkedIn, Naukri, Indeed discovery + routing to career pages | not started |
 | 5 | Email drafts, follow-ups, report | not started |
 | 6 | Cold email outreach (replaces spec sections 8 and 10) | not started |
