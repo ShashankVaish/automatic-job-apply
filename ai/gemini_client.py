@@ -63,6 +63,35 @@ def _truncate(text: str, limit: int = 12000) -> str:
     return t if len(t) <= limit else t[:limit] + "\n...[truncated]"
 
 
+def enforce_word_limit(text: str, limit: int, resume_link: str = "") -> str:
+    """Hold a generated letter to its word limit.
+
+    The prompt asks for under `limit` words, but a model can overshoot, and a
+    cover-letter box with a 200-word essay in it is worse than a short one. We
+    cut at the last complete sentence that fits and keep the resume link.
+    """
+    body = text
+    tail = ""
+    if resume_link and resume_link in text:
+        head, _, _ = text.rpartition(resume_link)
+        body = head.rstrip().rstrip("Resume:").rstrip()
+        tail = "\n\nResume: " + resume_link
+
+    words = body.split()
+    if len(words) <= limit:
+        return text.strip()
+
+    log.info("Cover letter came back at %d words; trimming to %d", len(words), limit)
+    clipped = " ".join(words[:limit])
+    # Prefer ending on a sentence rather than mid-clause.
+    cut = max(clipped.rfind(". "), clipped.rfind("! "), clipped.rfind("? "))
+    if cut > len(clipped) // 2:
+        clipped = clipped[: cut + 1]
+    elif not clipped.endswith((".", "!", "?")):
+        clipped = clipped.rstrip(",;: ") + "."
+    return (clipped + tail).strip()
+
+
 class GeminiClient:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
@@ -257,6 +286,7 @@ class GeminiClient:
             '\nReply as JSON: {"text": "<the letter>"}'
         )
         letter = self._ask(prompt, CoverLetter, temperature=0.4).text
+        letter = enforce_word_limit(letter, 150, resume_link)
         if resume_link and resume_link not in letter:
             letter = letter.rstrip() + "\n\nResume: " + resume_link
         return letter

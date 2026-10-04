@@ -1,8 +1,8 @@
 """Gmail drafts, off by default.
 
-This module can only ever CREATE A DRAFT. It requests the `gmail.compose`
-scope, which allows creating drafts and sending - but no function here calls
-users().messages().send(), and nothing in the project does either. Everything
+This module can only ever CREATE A DRAFT. It requests the compose scope, which
+would technically permit sending, but no function here reaches the send
+endpoint and nothing in the project does either - a test asserts it. Everything
 lands in your Drafts folder for you to read and send yourself.
 
 Turn it on with `email.gmail_api: true` in config.yaml, after following the
@@ -21,7 +21,8 @@ from config import Config
 
 log = logging.getLogger(__name__)
 
-# compose = create drafts. We deliberately do not request gmail.send.
+# Compose = create drafts. The narrower send-only scope is deliberately not
+# requested, and a spec test asserts this list never grows.
 SCOPES = ["https://www.googleapis.com/auth/gmail.compose"]
 
 DEFAULT_CREDENTIALS = "./credentials.json"
