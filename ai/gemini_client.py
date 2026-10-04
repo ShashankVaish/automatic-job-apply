@@ -333,106 +333,196 @@ class GeminiClient:
     def outreach_email(
         self,
         *,
+        recipient_role: str,
         company: str,
-        role: str,
+        job_role: str,
         contact_name: str = "",
+        job_description: str = "",
         company_context: str = "",
         resume_link: str = "",
+        resume_variant: str = "",
     ) -> EmailDraft:
-        """A cold introduction email. No job posting required.
+        """A cold email tailored to who is reading it.
 
-        This is a stranger's inbox, so the prompt is stricter than the
-        application prompt: short, specific, no flattery, no fabricated
-        knowledge about the company, and an easy opt-out.
+        `recipient_role` is "hr", "founder" or "cofounder". The three get
+        genuinely different emails: HR wants an application, a founder wants to
+        know you understand what they are building, a co-founder wants whatever
+        is relevant to their function.
         """
-        greeting = "Hi " + contact_name if contact_name else "Hello"
+        role = (recipient_role or "hr").lower()
+        greeting = (
+            "Hi " + contact_name.split()[0]
+            if contact_name.strip()
+            else "Hi " + (company or "team") + " team"
+        )
+
+        if role == "hr":
+            tone = (
+                "AUDIENCE: an HR person or recruiter.\n"
+                "- Formal and direct. This is an application, so say so in the "
+                "first line: you are applying for the role and want to be "
+                "considered.\n"
+                "- Body length: 90 to 150 words.\n"
+                "- State your year, degree and college.\n"
+                "- Name one specific detail from the job post and connect it to "
+                "something you have actually built.\n"
+                "- Say the resume is attached and also linked.\n"
+                "- Close by asking to be considered, and offer to do a task or "
+                "an interview.\n"
+            )
+        elif role == "founder":
+            tone = (
+                "AUDIENCE: the founder or CEO. Their time is the scarcest thing "
+                "here.\n"
+                "- Shorter: 80 to 110 words. No preamble.\n"
+                "- Show in one line that you understand what the company is "
+                "building, using only the context given below. If the context "
+                "says nothing about their product, say nothing about it.\n"
+                "- Focus on how you could help them ship or grow, not on your "
+                "coursework.\n"
+                "- Give one concrete thing you built and its result.\n"
+                "- Ask for a 10-minute call this week, or to be pointed to the "
+                "right person.\n"
+            )
+        else:
+            tone = (
+                "AUDIENCE: a co-founder. Tailor to their function, which you "
+                "should infer from their title in the context below: a CTO wants "
+                "technical depth and projects; a COO, CMO or CPO wants execution "
+                "and results.\n"
+                "- Length: 80 to 110 words.\n"
+                "- Give one concrete thing you built and its result, chosen to "
+                "match their function.\n"
+                "- Ask for a 10-minute call, or to be pointed to the right "
+                "person.\n"
+            )
+
         prompt = (
-            "Write a short cold outreach email from a job seeker to someone at a "
-            "company that has not advertised a role.\n\n"
+            "Write a cold outreach email from a job seeker to a specific person "
+            "at a company.\n\n"
             + HONESTY_RULE
             + "\nCANDIDATE PROFILE:\n"
             + self.cfg.profile.as_prompt_block()
+            + ("\nResume variant being sent: " + resume_variant if resume_variant else "")
             + "\n\nCOMPANY: "
             + company
-            + "\nROLE THEY ARE INTERESTED IN: "
-            + (role or "any suitable entry-level role")
-            + "\nCONTACT NAME: "
-            + (contact_name or "(unknown - use a neutral greeting)")
-            + "\nWHAT WE KNOW ABOUT THE COMPANY (may be empty):\n"
-            + _truncate(company_context, 3000)
-            + "\n\nHard requirements:\n"
-            "- subject: under 60 characters, specific, no clickbait, no ALL CAPS.\n"
-            "- body: 90 to 140 words, 5 to 8 short lines, plain text.\n"
-            "- Open with '" + greeting + ",'.\n"
-            "- Say in one line who the candidate is and what they are looking for.\n"
-            "- Give two concrete, truthful specifics from the profile (skills or "
-            "degree). Never invent projects, metrics, employers or achievements.\n"
-            "- Say nothing about the company that is not in the context above. If "
-            "the context is empty, do not pretend to know their product.\n"
-            "- No flattery ('huge fan', 'love what you're building'), no hype, no "
-            "buzzwords, no emoji, no exclamation marks.\n"
-            "- One clear ask: a short conversation or whether they are hiring.\n"
-            "- Include a one-line polite opt-out, e.g. 'If this isn't the right "
-            "time, no problem at all.'\n"
-            "- Second-to-last line must be: Resume: " + resume_link + "\n"
-            "- Sign off with the candidate's name, phone and email.\n"
+            + "\nROLE BEING APPLIED FOR: "
+            + (job_role or "any suitable entry-level role")
+            + "\nRECIPIENT: "
+            + (contact_name or "(name unknown)")
+            + " ("
+            + role
+            + ")\n\nJOB POST (use this for the specific detail):\n"
+            + _truncate(job_description, 5000)
+            + "\n\nWHAT WE KNOW ABOUT THE COMPANY (may be empty):\n"
+            + _truncate(company_context, 2500)
+            + "\n\n"
+            + tone
+            + "\nRULES FOR EVERY EMAIL:\n"
+            "- subject: fewer than 9 words, and it must contain the role name.\n"
+            "- Plain text only. No markdown, no emoji, no exclamation marks.\n"
+            "- No buzzwords ('synergy', 'passionate', 'rockstar', 'disrupt', "
+            "'leverage'), no flattery ('huge fan', 'love what you're building').\n"
+            "- Mention 2 or 3 of the candidate's most relevant real skills or "
+            "projects. Include a concrete result ONLY if the profile supports "
+            "one - never invent a metric, a user count or an employer.\n"
+            "- Mention exactly one specific thing about the company or the role, "
+            "taken from the job post or the context above. If neither contains "
+            "anything specific, refer to the role itself and nothing more.\n"
+            "- The greeting must be exactly: " + greeting + ",\n"
+            "- Include the resume link on its own line: Resume: " + resume_link + "\n"
+            "- Signature on the last line, exactly: "
+            + " | ".join(
+                part
+                for part in (
+                    self.cfg.profile.name,
+                    self.cfg.profile.phone,
+                    self.cfg.profile.linkedin,
+                )
+                if part
+            )
+            + "\n"
             '\nReply as JSON: {"subject": "...", "body": "..."}'
         )
         draft = self._ask(prompt, EmailDraft, temperature=0.5)
-        if resume_link and resume_link not in draft.body:
-            draft.body = draft.body.rstrip() + "\n\nResume: " + resume_link
+        draft.body = self._finish_email_body(draft.body, resume_link)
         return draft
 
     def outreach_followup(
         self,
         *,
         company: str,
-        role: str,
-        contact_name: str,
-        first_contacted: str,
-        stage: int,
+        job_role: str,
+        contact_name: str = "",
+        first_contacted: str = "",
+        original_subject: str = "",
         resume_link: str = "",
     ) -> EmailDraft:
-        """Follow-up 1 or 2 on a cold email that got no reply."""
-        tone = (
-            "This is the FIRST follow-up. Keep it to 3 or 4 short lines: a one-line "
-            "reminder of the original email with its date, one new truthful detail "
-            "from the profile, and the same light ask."
-            if stage <= 1
-            else "This is the SECOND and FINAL follow-up. Keep it to 3 lines, say "
-            "explicitly that this is the last time you'll reach out, and leave the "
-            "door open without any guilt-tripping."
+        """The single follow-up, sent once to the HR contact only.
+
+        There is never a second one, so this must not read as the start of a
+        sequence, and must not imply they were rude not to reply.
+        """
+        greeting = (
+            "Hi " + contact_name.split()[0]
+            if contact_name.strip()
+            else "Hi " + (company or "team") + " team"
         )
         prompt = (
-            "Write a follow-up to a cold outreach email that received no reply.\n\n"
+            "Write ONE short follow-up to a job application email that received "
+            "no reply. This is the only follow-up that will ever be sent.\n\n"
             + HONESTY_RULE
-            + "\nCANDIDATE PROFILE:\n"
-            + self.cfg.profile.as_prompt_block()
-            + "\n\nCOMPANY: "
+            + "\nCANDIDATE: "
+            + self.cfg.profile.name
+            + "\nCOMPANY: "
             + company
             + "\nROLE: "
-            + (role or "any suitable entry-level role")
-            + "\nCONTACT NAME: "
-            + (contact_name or "(unknown)")
-            + "\nFIRST CONTACTED: "
-            + first_contacted
-            + "\nFOLLOW-UP NUMBER: "
-            + str(max(1, stage))
-            + "\n\n"
-            + tone
-            + "\n- subject: reply-style, e.g. 'Re: <original topic>'.\n"
-            "- No pressure, no guilt, no 'just bumping this to the top of your "
-            "inbox', no implication that they were rude not to reply.\n"
-            "- Last line must be: Resume: " + resume_link + "\n"
+            + (job_role or "the role")
+            + "\nFIRST EMAIL SENT: "
+            + (first_contacted or "about a week ago")
+            + "\nORIGINAL SUBJECT: "
+            + (original_subject or "")
+            + "\n\nRequirements:\n"
+            "- 3 or 4 short lines total. This is a reply in the same thread, so "
+            "do not reintroduce the candidate at length.\n"
+            "- Line 1: a one-line reminder of the application and roughly when "
+            "it was sent.\n"
+            "- Line 2: that they are still interested, and one short truthful "
+            "detail from the profile.\n"
+            "- Line 3: a light ask about next steps, and make clear this is the "
+            "last time you'll follow up.\n"
+            "- No pressure, no guilt, no 'bumping this to the top of your "
+            "inbox', no implication they did anything wrong.\n"
+            "- subject: reply-style. Use 'Re: " + (original_subject or "your role")
+            + "'.\n"
+            "- The greeting must be exactly: " + greeting + ",\n"
+            "- Include the resume link on its own line: Resume: " + resume_link + "\n"
             '\nReply as JSON: {"subject": "...", "body": "..."}'
         )
         draft = self._ask(prompt, EmailDraft, temperature=0.45)
-        if resume_link and resume_link not in draft.body:
-            draft.body = draft.body.rstrip() + "\n\nResume: " + resume_link
+        draft.body = self._finish_email_body(draft.body, resume_link)
         return draft
 
+    def _finish_email_body(self, body: str, resume_link: str) -> str:
+        """Guarantee the resume link and the signature are present."""
+        text = (body or "").rstrip()
+        if resume_link and resume_link not in text:
+            text += "\n\nResume: " + resume_link
+        signature = " | ".join(
+            part
+            for part in (
+                self.cfg.profile.name,
+                self.cfg.profile.phone,
+                self.cfg.profile.linkedin,
+            )
+            if part
+        )
+        if signature and self.cfg.profile.name not in text:
+            text += "\n\n" + signature
+        return text
+
     def pick_resume_for_company(self, *, company: str, role: str, context: str) -> str:
-        """Choose a resume variant for outreach, where there is no job post."""
+        """Choose a resume variant when there is no scored job to go on."""
         variants = [
             {"name": r.name, "focus_keywords": r.focus_keywords} for r in self.cfg.resumes
         ]

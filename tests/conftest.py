@@ -39,6 +39,7 @@ def config_dict(tmp_path: Path) -> dict:
     """A fully filled config, so nothing trips the placeholder check."""
     resumes_dir = tmp_path / "resumes"
     resumes_dir.mkdir()
+    (tmp_path / "inputs").mkdir()
     for name in ("frontend", "data", "general"):
         (resumes_dir / (name + ".pdf")).write_bytes(MINIMAL_PDF)
 
@@ -128,13 +129,34 @@ def config_dict(tmp_path: Path) -> dict:
             "enabled": True,
             # Isolated per test, so no test can write into the real ./outbox.
             "outbox_dir": str(tmp_path / "outbox"),
-            "companies_csv": "./inputs/companies.csv",
-            "job_urls": "./inputs/job_urls.txt",
-            "dedupe_days": 90,
-            "max_followups": 2,
+            "contacts_csv": str(tmp_path / "inputs" / "contacts.csv"),
+            "companies_csv": str(tmp_path / "inputs" / "companies.csv"),
+            "job_urls": str(tmp_path / "inputs" / "job_urls.txt"),
+            "blocklist": str(tmp_path / "inputs" / "blocklist.txt"),
+            "max_contacts_per_company": 3,
             "follow_contact_page": True,
+            "use_hunter": False,
+            "hunter_min_confidence": 85,
+            "match_threshold": 70,
+            "job_lookback_days": 30,
+            "founder_delay_days": 1,
+            "no_repeat_days": 60,
+            "followup_after_days": 6,
+            "max_followups": 1,
+            "sending": {
+                "timezone": "Asia/Kolkata",
+                "start_hour": 9,
+                "start_minute": 30,
+                "end_hour": 12,
+                "end_minute": 30,
+                # Tests must not depend on the wall clock or sleep for minutes.
+                "enforce_window": False,
+                "daily_cap": 25,
+                "hard_max": 40,
+                "gap_min_s": 0,
+                "gap_max_s": 0,
+            },
         },
-        "followups": {"days_after": 6, "csv_path": str(tmp_path / "followups.csv")},
         "paths": {
             "db": str(tmp_path / "data" / "applications.db"),
             "logs_dir": str(tmp_path / "logs"),
@@ -167,6 +189,22 @@ def db(cfg):
     database = open_db(cfg.abs_path(cfg.paths.db))
     yield database
     database.close()
+
+
+@pytest.fixture
+def gmail():
+    """A fake Gmail service. No test may ever reach the real API."""
+    from tests.mock_gmail import MockGmailService
+
+    return MockGmailService()
+
+
+@pytest.fixture
+def inputs_dir(cfg):
+    """The per-test inputs directory, created on demand."""
+    path = cfg.abs_path(cfg.outreach.contacts_csv).parent
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 @pytest.fixture

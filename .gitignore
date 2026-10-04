@@ -41,3 +41,5 @@ __pycache__/
 # ---- outreach inputs and drafts ----
 inputs/companies.csv
 inputs/job_urls.txt
+inputs/contacts.csv
+inputs/blocklist.txt

@@ -152,19 +152,74 @@ class EmailCfg(BaseModel):
     gmail_api: bool = False
 
 
+class EmailSendingCfg(BaseModel):
+    """When and how fast cold email may go out."""
+
+    timezone: str = "Asia/Kolkata"
+    start_hour: int = 9
+    start_minute: int = 30
+    end_hour: int = 12
+    end_minute: int = 30
+    enforce_window: bool = True
+    weekdays_only: bool = True
+    daily_cap: int = 25
+    # The spec's hard ceiling. daily_cap is clamped to this, whatever the file says.
+    hard_max: int = 40
+    gap_min_s: float = 180      # 3 minutes
+    gap_max_s: float = 480      # 8 minutes
+
+    @field_validator("daily_cap")
+    @classmethod
+    def _cap(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("outreach.sending.daily_cap cannot be negative")
+        return v
+
+    @field_validator("hard_max")
+    @classmethod
+    def _hard_max(cls, v: int) -> int:
+        # Never above 40, however the config is edited.
+        return min(int(v), 40)
+
+
 class OutreachCfg(BaseModel):
     enabled: bool = True
     outbox_dir: str = "./outbox"
+
+    # Inputs. contacts.csv is the first and most trusted source.
+    contacts_csv: str = "./inputs/contacts.csv"
     companies_csv: str = "./inputs/companies.csv"
     job_urls: str = "./inputs/job_urls.txt"
-    dedupe_days: int = 90
-    max_followups: int = 2
+    blocklist: str = "./inputs/blocklist.txt"
+
+    # Discovery
+    max_contacts_per_company: int = 3
     follow_contact_page: bool = True
+    use_hunter: bool = False
+    hunter_min_confidence: int = 85
+    retry_misses_after_days: int = 30
 
+    # Scheduling and dedupe
+    match_threshold: int = 70       # jobs at or above this get outreach
+    job_lookback_days: int = 30
+    founder_delay_days: int = 1     # HR today, founder/cofounder a day later
+    no_repeat_days: int = 60        # never email the same address twice inside this
+    followup_after_days: int = 6
+    max_followups: int = 1          # exactly one, per the spec
 
-class FollowupCfg(BaseModel):
-    days_after: int = 6
-    csv_path: str = "./followups.csv"
+    sending: EmailSendingCfg = Field(default_factory=EmailSendingCfg)
+
+    @field_validator("max_followups")
+    @classmethod
+    def _one_followup(cls, v: int) -> int:
+        # The spec allows at most one follow-up. Never a second.
+        return min(max(int(v), 0), 1)
+
+    @field_validator("hunter_min_confidence")
+    @classmethod
+    def _confidence(cls, v: int) -> int:
+        # Results below 85 are not trustworthy enough to email.
+        return max(int(v), 85)
 
 
 class PathsCfg(BaseModel):
@@ -183,7 +238,6 @@ class Config(BaseModel):
     limits: LimitsCfg = Field(default_factory=LimitsCfg)
     email: EmailCfg = Field(default_factory=EmailCfg)
     outreach: OutreachCfg = Field(default_factory=OutreachCfg)
-    followups: FollowupCfg = Field(default_factory=FollowupCfg)
     paths: PathsCfg = Field(default_factory=PathsCfg)
 
     # Filled from .env, never from config.yaml.

@@ -149,11 +149,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tasks = p.add_argument_group("one-off tasks")
     tasks.add_argument(
-        "--followups",
-        action="store_true",
-        help="Draft follow-ups for applications with no reply, then exit",
-    )
-    tasks.add_argument(
         "--check",
         action="store_true",
         help="Verify config, resumes, database and the Gemini API key, then exit",
@@ -171,19 +166,54 @@ def build_parser() -> argparse.ArgumentParser:
         "--export", action="store_true", help="Write applications.csv and exit"
     )
 
-    out = p.add_argument_group("cold email outreach (never sends)")
+    out = p.add_argument_group("cold email outreach (HR, founder, co-founder)")
     out.add_argument(
-        "--outreach",
+        "--email-queue",
         action="store_true",
-        help="Draft cold emails from inputs/companies.csv and inputs/job_urls.txt",
+        help="DEFAULT for outreach. Find contacts, write the emails, queue them, "
+        "then show each one for y/n/edit before sending.",
     )
     out.add_argument(
-        "--outreach-followups",
+        "--email-auto",
         action="store_true",
-        help="Draft follow-ups for cold emails that got no reply",
+        help="Send everything already queued, without asking.",
     )
     out.add_argument(
-        "--outreach-report", action="store_true", help="Show outreach activity and exit"
+        "--email-followups",
+        action="store_true",
+        help="Queue the single follow-up for HR emails with no reply",
+    )
+    out.add_argument(
+        "--email-report",
+        action="store_true",
+        help="Sent / replied / bounced and reply rate for the last 30 days",
+    )
+    out.add_argument(
+        "--email-test-to",
+        default="",
+        metavar="ADDRESS",
+        help="Send every queued email to this address instead of the real "
+        "recipient, so you can preview them in your own inbox.",
+    )
+    out.add_argument(
+        "--email-sync",
+        action="store_true",
+        help="Check your mailbox for replies and bounces, and act on them",
+    )
+    out.add_argument(
+        "--gmail-auth",
+        action="store_true",
+        help="Do the one-time Gmail browser consent, then exit",
+    )
+    out.add_argument(
+        "--contacts-report",
+        action="store_true",
+        help="Show every contact found, and where it came from",
+    )
+    out.add_argument(
+        "--no-discover",
+        action="store_true",
+        help="With --email-queue, only use inputs/contacts.csv - never open a browser",
     )
 
     p.set_defaults(mode="assist")
@@ -428,179 +458,306 @@ def cmd_export(cfg: Config, db: Database) -> int:
     return 0
 
 
-# ----------------------------------------------------------------- followups
-
-
-def cmd_followups(cfg: Config, db: Database) -> int:
-    from ai.gemini_client import GeminiClient
-    from email_drafts import build_followups
-
-    rows = build_followups(cfg, db, GeminiClient(cfg))
-    if not rows:
-        console.print(
-            "[yellow]Nothing is due a follow-up[/] "
-            "(applications become due {0} days after applying).".format(
-                cfg.followups.days_after
-            )
-        )
-        return 0
-    table = Table(title="Follow-ups queued (not sent)", box=box.ASCII)
-    table.add_column("applied", no_wrap=True)
-    table.add_column("company", overflow="fold")
-    table.add_column("role", overflow="fold")
-    table.add_column("channel", no_wrap=True)
-    for r in rows:
-        table.add_row(r["applied_on"], r["company"], r["role"], r["channel"])
-    console.print(table)
-    console.print(
-        "Written to [bold]{0}[/]. Nothing was sent - review and send them yourself.".format(
-            cfg.abs_path(cfg.followups.csv_path)
-        )
-    )
-    return 0
-
-
 # -------------------------------------------------------------- outreach
 
 
-def cmd_outreach(cfg: Config, db: Database, args) -> int:
+def _gemini(cfg: Config):
     from ai.gemini_client import GeminiClient
+
+    return GeminiClient(cfg)
+
+
+def cmd_gmail_auth(cfg: Config) -> int:
+    """Do the one-time Gmail consent so later runs are silent."""
+    import gmail_client
+
+    try:
+        service = gmail_client.get_service(cfg, interactive=True)
+        profile = service.users().getProfile(userId="me").execute()
+    except Exception as exc:
+        console.print("[red]Gmail authorisation failed:[/] " + escape(str(exc)))
+        return 1
+    console.print(
+        "[green]Gmail authorised[/] for "
+        + escape(str(profile.get("emailAddress", "your account")))
+    )
+    console.print("Token cached - you won't be asked again unless you revoke access.")
+    return 0
+
+
+def cmd_email_queue(cfg: Config, db: Database, args) -> int:
+    """Find contacts, write the emails, queue them, then review and send."""
     from browser.launcher import BrowserSession
-    from limits import now_in_window
-    from outreach import OutreachStats, draft_outreach, load_targets
+    from outreach import build_queue, load_targets
 
     if not cfg.outreach.enabled:
         console.print("[yellow]Outreach is disabled[/] (outreach.enabled in config.yaml)")
         return 0
 
-    if not args.ignore_run_window:
-        ok, why = now_in_window(cfg)
-        if not ok:
-            console.print("[red]Outside the run window.[/] " + why)
-            return 2
-
-    targets = load_targets(
-        cfg, csv_path=cfg.outreach.companies_csv, urls_path=cfg.outreach.job_urls
-    )
+    targets = load_targets(cfg, db)
     if not targets:
         console.print(
-            "[yellow]No outreach targets.[/] "
-            "Copy [bold]inputs/companies.example.csv[/] to [bold]inputs/companies.csv[/] "
-            "and/or [bold]inputs/job_urls.example.txt[/] to [bold]inputs/job_urls.txt[/], "
-            "then fill them in."
+            "[yellow]No outreach targets.[/] Either run the job search first so "
+            "there are matched jobs, or fill in [bold]inputs/companies.csv[/] "
+            "(copy it from companies.example.csv)."
         )
         return 0
 
     console.print(
-        "Drafting cold emails for {0} target(s). "
-        "[bold]Nothing is sent[/] - drafts land in ./outbox/.".format(len(targets))
+        "Building the outreach queue for {0} company target(s). "
+        "Nothing sends until you approve it.".format(len(targets))
     )
 
-    gemini = GeminiClient(cfg)
-    needs_browser = any(t.source == "job_url" for t in targets)
-    stats: OutreachStats
+    gemini = _gemini(cfg)
+    needs_browser = not args.no_discover and any(t.website for t in targets)
 
     if needs_browser:
         with BrowserSession(cfg) as session:
-            stats = draft_outreach(
-                cfg, db, gemini, targets,
-                page=session.new_page(),
-                limit=args.max,
-                dedupe_days=cfg.outreach.dedupe_days,
+            stats = build_queue(
+                cfg, db, gemini, targets, page=session.new_page(), limit=args.max
             )
     else:
-        stats = draft_outreach(
-            cfg, db, gemini, targets,
-            limit=args.max,
-            dedupe_days=cfg.outreach.dedupe_days,
-        )
+        stats = build_queue(cfg, db, gemini, targets, limit=args.max)
 
-    table = Table(title="Outreach drafted (not sent)", box=box.ASCII)
-    for col in ("targets", "drafted", "skipped", "no address", "failed"):
+    table = Table(title="Outreach queue built", box=box.ASCII)
+    for col in ("targets", "contacts", "queued", "no address", "skipped", "failed"):
         table.add_column(col, justify="right", no_wrap=True)
     table.add_row(
-        str(stats.found),
-        str(stats.drafted),
+        str(stats.targets),
+        str(stats.contacts_found),
+        str(stats.queued),
+        str(stats.no_email),
         str(stats.skipped),
-        str(stats.needs_email),
         str(stats.failed),
     )
     console.print(table)
-    for note in stats.notes[:15]:
-        console.print("[yellow]note:[/] " + note)
-    if stats.drafted:
+    for note in stats.notes[:20]:
+        console.print("[yellow]note:[/] " + escape(note))
+
+    queued = db.queued_emails(due_only=True)
+    if not queued:
         console.print(
-            "Read the drafts in [bold]{0}[/] and send the ones you want "
-            "yourself.".format(cfg.abs_path(cfg.outreach.outbox_dir))
+            "Nothing is due to send right now. Founder and co-founder emails are "
+            "scheduled a day after the HR one."
         )
-    return 0
-
-
-def cmd_outreach_followups(cfg: Config, db: Database) -> int:
-    from ai.gemini_client import GeminiClient
-    from outreach import draft_outreach_followups
-
-    if cfg.outreach.max_followups <= 0:
-        console.print("[yellow]Outreach follow-ups are disabled[/] (max_followups: 0)")
         return 0
 
-    rows = draft_outreach_followups(
-        cfg, db, GeminiClient(cfg), max_stage=cfg.outreach.max_followups
+    console.print(
+        "\n[bold]{0}[/] email(s) queued and due. Reviewing them now - "
+        "y to send, n to skip, e to edit, q to stop.".format(len(queued))
     )
-    if not rows:
-        console.print(
-            "[yellow]No outreach is due a follow-up[/] "
-            "(due {0} days after the last contact).".format(cfg.followups.days_after)
-        )
-        return 0
+    return cmd_email_send(cfg, db, args, mode="queue")
 
-    table = Table(title="Outreach follow-ups drafted (not sent)", box=box.ASCII)
-    table.add_column("stage", no_wrap=True)
-    table.add_column("company", overflow="fold")
-    table.add_column("email", overflow="fold")
-    table.add_column("first contacted", no_wrap=True)
-    for r in rows:
-        table.add_row(r["stage"], r["company"], r["email"], r["first_contacted"])
+
+def cmd_email_send(cfg: Config, db: Database, args, *, mode: str) -> int:
+    """Send the queued emails, asking first unless mode is "auto"."""
+    from limits import email_window_now
+    from outreach import send_queue
+
+    test_to = (args.email_test_to or "").strip()
+    if test_to:
+        console.print(
+            "[cyan]TEST MODE[/] - every email goes to [bold]{0}[/] instead of the "
+            "real recipient.".format(escape(test_to))
+        )
+
+    if mode == "auto" and not test_to:
+        console.print(
+            "[yellow]AUTO SEND[/] - queued emails will be sent without asking, "
+            "inside the sending window and the daily cap."
+        )
+
+    ok, why = email_window_now(cfg)
+    if not ok and not args.ignore_run_window:
+        console.print("[red]Not sending.[/] " + escape(why))
+        console.print(
+            "Queued emails stay queued. Run again inside the window, or pass "
+            "--ignore-run-window."
+        )
+        return 2
+
+    stats = send_queue(
+        cfg,
+        db,
+        mode=mode,
+        test_to=test_to,
+        limit=args.max,
+        ignore_window=args.ignore_run_window,
+    )
+
+    table = Table(title="Sending", box=box.ASCII)
+    for col in ("considered", "sent", "declined", "edited", "skipped", "failed"):
+        table.add_column(col, justify="right", no_wrap=True)
+    table.add_row(
+        str(stats.considered),
+        str(stats.sent),
+        str(stats.declined),
+        str(stats.edited),
+        str(stats.skipped),
+        str(stats.failed),
+    )
     console.print(table)
-    console.print("Drafts are in [bold]{0}[/].".format(cfg.abs_path(cfg.outreach.outbox_dir)))
+    for note in stats.notes[:20]:
+        console.print("[yellow]note:[/] " + escape(note))
+    if stats.replied_stops:
+        console.print(
+            "[green]{0} company/companies had already replied[/] - outreach to "
+            "them has stopped.".format(stats.replied_stops)
+        )
     return 0
 
 
-def cmd_outreach_report(cfg: Config, db: Database, days: int) -> int:
-    rows = db.outreach_rows(days)
-    if not rows:
-        console.print("[yellow]No outreach in the last {0} days.[/]".format(days))
+def cmd_email_followups(cfg: Config, db: Database, args) -> int:
+    """Queue the one permitted follow-up, then review and send it."""
+    from outreach import build_followup_queue
+
+    stats = build_followup_queue(cfg, db, _gemini(cfg), limit=args.max)
+    if not stats.queued:
+        console.print(
+            "[yellow]Nothing is due a follow-up[/] (due {0} days after the first "
+            "email, HR contacts only, one follow-up ever).".format(
+                cfg.outreach.followup_after_days
+            )
+        )
+        for note in stats.notes[:10]:
+            console.print("[yellow]note:[/] " + escape(note))
         return 0
 
-    table = Table(title="Cold outreach, last {0} days".format(days), box=box.ASCII)
-    table.add_column("date", no_wrap=True, min_width=10)
+    console.print(
+        "[bold]{0}[/] follow-up(s) queued out of {1} due.".format(
+            stats.queued, stats.targets
+        )
+    )
+    mode = "auto" if args.email_auto else "queue"
+    return cmd_email_send(cfg, db, args, mode=mode)
+
+
+def cmd_email_sync(cfg: Config, db: Database) -> int:
+    """Read your mailbox for replies and bounces."""
+    from outreach import sync_replies_and_bounces
+
+    replies, bounces = sync_replies_and_bounces(cfg, db)
+    console.print(
+        "Found [bold]{0}[/] new repl{1} and [bold]{2}[/] bounce{3}.".format(
+            replies, "y" if replies == 1 else "ies", bounces, "" if bounces == 1 else "s"
+        )
+    )
+    if replies:
+        console.print("Outreach to companies that replied has stopped.")
+    if bounces:
+        console.print("Bounced addresses will never be used again.")
+    return 0
+
+
+def cmd_contacts_report(cfg: Config, db: Database) -> int:
+    rows = db.all_contacts()
+    if not rows:
+        console.print(
+            "[yellow]No contacts found yet.[/] Add your own to "
+            "[bold]inputs/contacts.csv[/], or run --email-queue to discover some."
+        )
+        return 0
+
+    table = Table(title="Contacts", box=box.ASCII)
     table.add_column("company", overflow="fold", min_width=14)
+    table.add_column("role", no_wrap=True)
+    table.add_column("name", overflow="fold")
     table.add_column("email", overflow="fold")
-    table.add_column("resume", no_wrap=True)
-    table.add_column("f/ups", justify="right", no_wrap=True)
+    table.add_column("source", no_wrap=True)
+    table.add_column("conf", justify="right", no_wrap=True)
     table.add_column("status", no_wrap=True)
-    for r in rows[:60]:
-        colour = {
-            "drafted": "cyan",
-            "needs_email": "yellow",
-            "skipped": "dim",
-            "failed": "red",
-        }.get(r["status"], "white")
+    for r in rows:
+        colour = {"active": "white", "bounced": "red", "blocked": "dim"}.get(
+            r["status"], "white"
+        )
         table.add_row(
-            r["date"],
-            clip(r["company"], 28),
-            "" if r["status"] == "needs_email" else clip(r["email"], 30),
-            r["resume_variant"] or "-",
-            str(r["followup_stage"]),
+            clip(r["company"], 24),
+            r["role"],
+            clip(r["name"] or "-", 18),
+            clip(r["email"], 30),
+            r["source"] or "-",
+            str(r["confidence"] or "-") + ("v" if r["verified"] else ""),
             "[{0}]{1}[/]".format(colour, r["status"]),
         )
     console.print(table)
-    drafted = sum(1 for r in rows if r["status"] == "drafted")
     console.print(
-        "{0} drafted, {1} waiting on an address. "
-        "[bold]Nothing has been sent by this tool.[/]".format(
-            drafted, sum(1 for r in rows if r["status"] == "needs_email")
+        "[dim]conf = confidence; 'v' means you supplied it in inputs/contacts.csv.[/]"
+    )
+
+    misses = db.conn.execute(
+        "SELECT * FROM contact_misses ORDER BY date_tried DESC LIMIT 20"
+    ).fetchall()
+    if misses:
+        miss_table = Table(title="No work email found", box=box.ASCII)
+        miss_table.add_column("company", overflow="fold")
+        miss_table.add_column("role", no_wrap=True)
+        miss_table.add_column("tried", no_wrap=True)
+        for m in misses:
+            miss_table.add_row(clip(m["company"], 30), m["role"], m["date_tried"])
+        console.print(miss_table)
+        console.print(
+            "[dim]Addresses are never guessed, so these need you to find the "
+            "right person.[/]"
         )
+    return 0
+
+
+def cmd_email_report(cfg: Config, db: Database, days: int = 30) -> int:
+    stats = db.email_stats(days)
+    rows = db.email_rows(days)
+
+    if not rows:
+        console.print("[yellow]No outreach emails in the last {0} days.[/]".format(days))
+        return 0
+
+    summary = Table(title="Outreach, last {0} days".format(days), box=box.ASCII)
+    for col in ("queued", "sent", "replied", "bounced", "failed", "skipped", "reply rate"):
+        summary.add_column(col, justify="right", no_wrap=True)
+    summary.add_row(
+        str(stats["queued"]),
+        str(stats["sent"]),
+        str(stats["replied"]),
+        str(stats["bounced"]),
+        str(stats["failed"]),
+        str(stats["skipped"]),
+        "{0}%".format(stats["reply_rate"]),
+    )
+    console.print(summary)
+
+    detail = Table(title="Emails", box=box.ASCII)
+    detail.add_column("date", no_wrap=True, min_width=10)
+    detail.add_column("company - recipient", overflow="fold", min_width=18)
+    detail.add_column("type", no_wrap=True)
+    detail.add_column("status", no_wrap=True)
+    for r in rows[:60]:
+        colour = {
+            "sent": "cyan",
+            "replied": "green",
+            "bounced": "red",
+            "failed": "red",
+            "queued": "yellow",
+            "skipped": "dim",
+        }.get(r["status"], "white")
+        label = r["recipient_role"]
+        if r["is_followup"]:
+            label += " f/up"
+        detail.add_row(
+            r["date"],
+            "{0} - {1}".format(clip(r["company"], 22), clip(r["recipient_email"], 28)),
+            label,
+            "[{0}]{1}[/]".format(colour, r["status"]),
+        )
+    console.print(detail)
+
+    if stats["replied"]:
+        console.print(
+            "[green]{0} compan{1} replied.[/] Outreach to them has stopped - go "
+            "and answer them.".format(
+                stats["replied"], "y" if stats["replied"] == 1 else "ies"
+            )
+        )
+    console.print(
+        "Reply rate counts replies against delivered mail (sent + replied)."
     )
     return 0
 
@@ -777,7 +934,13 @@ def main(argv: list[str] | None = None) -> int:
     # --check reports problems itself; --report/--export/--login are offline or
     # don't touch Gemini, and should work before the profile is filled in.
     offline = (
-        args.check or args.report or args.export or args.login or args.outreach_report
+        args.check
+        or args.report
+        or args.export
+        or args.login
+        or args.email_report
+        or args.contacts_report
+        or args.gmail_auth
     )
     cfg = load_config(args.config, strict=not offline)
     log_path = setup_logging(cfg, args.verbose)
@@ -790,14 +953,20 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_report(cfg, db, args.report_days)
         if args.export:
             return cmd_export(cfg, db)
-        if args.followups:
-            return cmd_followups(cfg, db)
-        if args.outreach_report:
-            return cmd_outreach_report(cfg, db, args.report_days)
-        if args.outreach:
-            return cmd_outreach(cfg, db, args)
-        if args.outreach_followups:
-            return cmd_outreach_followups(cfg, db)
+        if args.email_report:
+            return cmd_email_report(cfg, db, 30)
+        if args.contacts_report:
+            return cmd_contacts_report(cfg, db)
+        if args.gmail_auth:
+            return cmd_gmail_auth(cfg)
+        if args.email_sync:
+            return cmd_email_sync(cfg, db)
+        if args.email_followups:
+            return cmd_email_followups(cfg, db, args)
+        if args.email_auto:
+            return cmd_email_send(cfg, db, args, mode="auto")
+        if args.email_queue:
+            return cmd_email_queue(cfg, db, args)
 
         sites = selected_sites(cfg, args.site)
         if args.login:

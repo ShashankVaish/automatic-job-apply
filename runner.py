@@ -359,18 +359,21 @@ class Runner:
     # ---------------------------------------------------------- email route
 
     def apply_by_email(self, job: Job, resume: Any) -> ApplyOutcome:
-        from email_drafts import draft_application_email
+        """A posting that says "email us your CV" is handled by outreach.
 
-        try:
-            path = draft_application_email(self.cfg, self.gemini, job, resume)
-        except Exception as exc:
-            return ApplyOutcome.failed(
-                "could not draft the application email: {0}: {1}".format(
-                    type(exc).__name__, exc
-                )
-            )
-        log.info("Drafted an email application at %s", path)
-        return ApplyOutcome.drafted("draft saved to " + str(path))
+        The address in the job post is exactly the first HR source the outreach
+        pipeline looks for, so rather than writing a separate draft here we
+        record the job and let `--email-queue` compose, review and send it.
+        """
+        log.info(
+            "%s wants an email application to %s - routed to the outreach queue",
+            job.label(),
+            job.apply_email,
+        )
+        return ApplyOutcome.drafted(
+            "apply by email to {0}; run `python main.py --email-queue` to "
+            "write and review it".format(job.apply_email)
+        )
 
     # -------------------------------------------------------- submit modes
 
@@ -560,6 +563,9 @@ class Runner:
             resume_variant=resume_variant,
             error=(error or "")[:800] or None,
             screenshot=screenshot,
+            # Kept so outreach can tailor emails to this job later.
+            description=job.description or None,
+            apply_email=job.apply_email or None,
         )
 
     def print_summary(

@@ -253,57 +253,127 @@ class MockGemini:
                 return variant.name
         return self.resume
 
-    def outreach_email(
-        self, *, company, role, contact_name="", company_context="", resume_link=""
-    ) -> EmailDraft:
-        self._maybe_fail("outreach_email")
-        self.calls.append(("outreach_email", company))
+    def _signature(self) -> str:
         p = self.cfg.profile
-        greeting = ("Hi " + contact_name) if contact_name else "Hello"
-        return EmailDraft(
-            subject="{0} - {1}".format(role or "Entry-level role", p.name),
-            body="\n".join(
-                [
-                    greeting + ",",
-                    "",
-                    "I am a {0} in {1} from {2}, looking for {3} work.".format(
-                        p.experience_level, p.degree, p.college, role or "entry-level"
-                    ),
-                    "I work mainly with {0}.".format(", ".join(p.skills[:3])),
-                    "Would you have ten minutes to talk about openings at {0}?".format(
-                        company
-                    ),
-                    "If this isn't the right time, no problem at all.",
-                    "",
-                    "Resume: " + resume_link,
-                    "",
-                    "{0}\n{1} | {2}".format(p.name, p.phone, p.email),
-                ]
-            ),
+        return " | ".join(part for part in (p.name, p.phone, p.linkedin) if part)
+
+    def outreach_email(
+        self,
+        *,
+        recipient_role,
+        company,
+        job_role,
+        contact_name="",
+        job_description="",
+        company_context="",
+        resume_link="",
+        resume_variant="",
+    ) -> EmailDraft:
+        """Mimics the real client's three tones, including their word counts."""
+        self._maybe_fail("outreach_email")
+        self.calls.append(("outreach_email", recipient_role + ":" + company))
+        p = self.cfg.profile
+        role = (recipient_role or "hr").lower()
+        greeting = (
+            "Hi " + contact_name.split()[0]
+            if contact_name.strip()
+            else "Hi " + (company or "team") + " team"
         )
+        role_name = job_role or "an entry-level role"
+
+        if role == "hr":
+            lines = [
+                greeting + ",",
+                "",
+                "I came across the {0} opening at {1} and would like to be "
+                "considered.".format(role_name, company),
+                "I am a {0} studying {1} at {2}, and I have built projects with "
+                "{3}.".format(
+                    p.experience_level, p.degree, p.college, ", ".join(p.skills[:3])
+                ),
+                "The posting mentions work I have done something similar to, so I "
+                "think the fit is good.",
+                "My resume is attached and also linked below. I can start "
+                "{0} and am happy to do a task or an interview.".format(
+                    p.notice_period.lower()
+                ),
+                "",
+                "Resume: " + resume_link,
+                "",
+                self._signature(),
+            ]
+            subject = "Application - " + role_name
+        elif role == "founder":
+            lines = [
+                greeting + ",",
+                "",
+                "I saw {0} is hiring for {1} and wanted to reach out "
+                "directly.".format(company, role_name),
+                "I work mainly with {0} and have shipped small projects end to "
+                "end.".format(", ".join(p.skills[:2])),
+                "Would you be open to a 10-minute call this week, or could you "
+                "point me to the right person?",
+                "",
+                "Resume: " + resume_link,
+                "",
+                self._signature(),
+            ]
+            subject = "{0} for {1}".format(role_name, company)
+        else:
+            lines = [
+                greeting + ",",
+                "",
+                "I saw {0} is hiring for {1}.".format(company, role_name),
+                "My strongest areas are {0}, which I think line up with what you "
+                "look after.".format(", ".join(p.skills[:2])),
+                "Could we talk for 10 minutes, or could you point me to the right "
+                "person?",
+                "",
+                "Resume: " + resume_link,
+                "",
+                self._signature(),
+            ]
+            subject = "{0} - {1}".format(role_name, p.name)
+
+        return EmailDraft(subject=subject, body="\n".join(lines))
 
     def outreach_followup(
-        self, *, company, role, contact_name, first_contacted, stage, resume_link=""
+        self,
+        *,
+        company,
+        job_role,
+        contact_name="",
+        first_contacted="",
+        original_subject="",
+        resume_link="",
     ) -> EmailDraft:
         self._maybe_fail("outreach_followup")
         self.calls.append(("outreach_followup", company))
-        last = "This is the last time I'll reach out." if stage >= 2 else ""
+        greeting = (
+            "Hi " + contact_name.split()[0]
+            if contact_name.strip()
+            else "Hi " + (company or "team") + " team"
+        )
         lines = [
-            "Hello,",
+            greeting + ",",
             "",
-            "I wrote on {0} about {1} roles at {2}.".format(
-                first_contacted, role or "entry-level", company
+            "I wrote on {0} about the {1} role.".format(
+                first_contacted or "last week", job_role or "open"
             ),
-            "I'm still interested and happy to share more.",
+            "I am still very interested, and happy to share more if useful.",
+            "If there is no fit right now that is completely fine - this is the "
+            "last time I will follow up.",
+            "",
+            "Resume: " + resume_link,
+            "",
+            self._signature(),
         ]
-        if last:
-            lines.append(last)
-        lines += ["", "Resume: " + resume_link]
         return EmailDraft(
-            subject="Re: {0} - {1}".format(role or "Entry-level role", self.cfg.profile.name),
+            subject="Re: " + (original_subject or "my application"),
             body="\n".join(lines),
         )
 
+    # --------------------------------------------------------- follow-ups
     # --------------------------------------------------------- follow-ups
 
     def follow_up(self, *, title, company, applied_on, channel="email") -> str:

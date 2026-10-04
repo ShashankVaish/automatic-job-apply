@@ -38,6 +38,76 @@ def now_in_window(cfg: Config) -> tuple[bool, str]:
     )
 
 
+def email_window_now(cfg: Config) -> tuple[bool, str]:
+    """Is it an acceptable moment to send cold email?
+
+    Weekdays only, inside the configured window. Cold email at 2am on a Sunday
+    reads as a bot, so this is a hard gate on sending - queueing and drafting
+    are unaffected.
+    """
+    sending = cfg.outreach.sending
+    try:
+        tz = ZoneInfo(sending.timezone)
+    except Exception:
+        log.warning("Unknown timezone %r; falling back to local time", sending.timezone)
+        tz = None
+
+    now = datetime.now(tz) if tz else datetime.now()
+    label = now.strftime("%a %H:%M")
+
+    if not sending.enforce_window:
+        return True, "sending window not enforced (now {0})".format(label)
+
+    if now.weekday() > 4:
+        return False, (
+            "It is {0}. Cold email is only sent Monday to Friday. "
+            "Set outreach.sending.enforce_window: false to override.".format(label)
+        )
+
+    minutes = now.hour * 60 + now.minute
+    start = sending.start_hour * 60 + sending.start_minute
+    end = sending.end_hour * 60 + sending.end_minute
+
+    if start <= minutes < end:
+        return True, "{0} {1} is inside the sending window".format(label, sending.timezone)
+
+    return False, (
+        "It is {0} {1}. Cold email is only sent between {2:02d}:{3:02d} and "
+        "{4:02d}:{5:02d}. Set outreach.sending.enforce_window: false to "
+        "override.".format(
+            label,
+            sending.timezone,
+            sending.start_hour,
+            sending.start_minute,
+            sending.end_hour,
+            sending.end_minute,
+        )
+    )
+
+
+def daily_email_cap(cfg: Config) -> int:
+    """The daily sending cap, clamped to the documented hard maximum of 40."""
+    configured = int(cfg.outreach.sending.daily_cap)
+    hard_max = int(cfg.outreach.sending.hard_max)
+    if configured > hard_max:
+        log.warning(
+            "outreach.sending.daily_cap is %d, above the hard maximum of %d; using %d",
+            configured,
+            hard_max,
+            hard_max,
+        )
+        return hard_max
+    return max(0, configured)
+
+
+def email_budget_left(cfg: Config, db: Database) -> tuple[int, str]:
+    """How many more emails may be sent today."""
+    cap = daily_email_cap(cfg)
+    used = db.count_sent_today()
+    left = max(0, cap - used)
+    return left, "{0}/{1} sent today".format(used, cap)
+
+
 class RunBudget:
     """Tracks what's left to spend: per-site caps, career-page cap, run cap."""
 

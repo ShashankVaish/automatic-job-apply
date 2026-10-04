@@ -1,0 +1,7 @@
+# Addresses and domains that must never be emailed.
+# One per line. A bare domain blocks everyone at that domain.
+# Lines starting with # are ignored.
+#
+# someone@example.com
+# recruiters-i-annoyed.example
+# @competitor.example
