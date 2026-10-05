@@ -536,10 +536,20 @@ def cmd_email_queue(cfg: Config, db: Database, args) -> int:
 
     queued = db.queued_emails(due_only=True)
     if not queued:
-        console.print(
-            "Nothing is due to send right now. Founder and co-founder emails are "
-            "scheduled a day after the HR one."
-        )
+        waiting = db.queued_emails(due_only=False)
+        if waiting:
+            console.print(
+                "Nothing is due to send today. {0} email(s) are waiting - founder "
+                "and co-founder emails are scheduled a day after the HR one, so "
+                "run this again tomorrow.".format(len(waiting))
+            )
+        elif stats.failed:
+            console.print(
+                "[red]Nothing could be queued.[/] {0} email(s) failed to be "
+                "written - check the log at the path above.".format(stats.failed)
+            )
+        else:
+            console.print("Nothing new to queue.")
         return 0
 
     console.print(

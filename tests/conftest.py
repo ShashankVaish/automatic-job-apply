@@ -124,7 +124,6 @@ def config_dict(tmp_path: Path) -> dict:
                 "between_apps_max_s": 0,
             },
         },
-        "email": {"drafts_dir": str(tmp_path / "drafts"), "gmail_api": False},
         "outreach": {
             "enabled": True,
             # Isolated per test, so no test can write into the real ./outbox.

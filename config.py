@@ -147,11 +147,6 @@ class LimitsCfg(BaseModel):
         return int(self.daily.get(site, 10_000))
 
 
-class EmailCfg(BaseModel):
-    drafts_dir: str = "./drafts"
-    gmail_api: bool = False
-
-
 class EmailSendingCfg(BaseModel):
     """When and how fast cold email may go out."""
 
@@ -236,7 +231,6 @@ class Config(BaseModel):
     matching: MatchingCfg = Field(default_factory=MatchingCfg)
     sources: dict[str, SourceCfg] = Field(default_factory=dict)
     limits: LimitsCfg = Field(default_factory=LimitsCfg)
-    email: EmailCfg = Field(default_factory=EmailCfg)
     outreach: OutreachCfg = Field(default_factory=OutreachCfg)
     paths: PathsCfg = Field(default_factory=PathsCfg)
 
@@ -341,7 +335,11 @@ def load_config(path: str | Path = "config.yaml", *, strict: bool = True) -> Con
                 "from https://aistudio.google.com/app/apikey"
             )
 
-    for d in (cfg.paths.logs_dir, cfg.paths.screenshots_dir, cfg.email.drafts_dir):
+    for d in (
+        cfg.paths.logs_dir,
+        cfg.paths.screenshots_dir,
+        cfg.outreach.outbox_dir,
+    ):
         cfg.abs_path(d).mkdir(parents=True, exist_ok=True)
     cfg.abs_path(cfg.paths.db).parent.mkdir(parents=True, exist_ok=True)
     return cfg

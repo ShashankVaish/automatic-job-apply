@@ -233,31 +233,6 @@ def send_message(
     return result
 
 
-def create_draft(
-    cfg: Config,
-    *,
-    to: str,
-    subject: str,
-    body: str,
-    attachment: Path | str | None = None,
-    service: Any | None = None,
-) -> str:
-    """Create a Gmail draft without sending. Used by the apply-by-email flow."""
-    svc = service or get_service(cfg)
-    message = build_message(
-        to=to, subject=subject, body=body, sender=cfg.profile.email, attachment=attachment
-    )
-    created = (
-        svc.users()
-        .drafts()
-        .create(userId="me", body={"message": {"raw": encode(message)}})
-        .execute()
-    )
-    draft_id = str(created.get("id", ""))
-    log.info("Gmail draft %s created for %s (not sent)", draft_id, to)
-    return draft_id
-
-
 # -------------------------------------------------------- reading the inbox
 
 

@@ -122,10 +122,6 @@ limits:
     between_apps_min_s: 45
     between_apps_max_s: 120
 
-email:
-  drafts_dir: "./drafts"
-  gmail_api: false            # true = also create a Gmail draft (never sends)
-
 # ---------------------------------------------------------------------------
 # Cold email outreach to HR, founders and co-founders, sent from your Gmail.
 # Replaces the old "apply by email" and follow-up steps.
