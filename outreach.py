@@ -660,15 +660,19 @@ def preview(row: Any, *, test_to: str = "") -> str:
     return "\n".join(lines)
 
 
-def edit_body(current: str) -> str:
-    """Let the user retype the body in the terminal. Blank line twice to finish."""
+def edit_body(current: str, ask: Any = None) -> str:
+    """Let the user retype the body in the terminal. Blank line finishes.
+
+    `ask` is injectable so the review loop can be driven in tests.
+    """
+    read = ask or input
     print("  Type the new body. Finish with an empty line, or just press Enter")
     print("  twice to keep what's there.")
     collected: list[str] = []
     blanks = 0
     while True:
         try:
-            line = input()
+            line = read("")
         except EOFError:
             break
         if line.strip() == "":
@@ -818,7 +822,7 @@ def send_queue(
                 new_subject = (ask("  New subject (Enter keeps it): ") or "").strip()
                 if new_subject:
                     subject = new_subject
-                body = edit_body(body)
+                body = edit_body(body, ask)
                 db.update_email(email_id, subject=subject, body=body)
                 stats.edited += 1
                 print(preview(db.email_row(email_id), test_to=test_to))

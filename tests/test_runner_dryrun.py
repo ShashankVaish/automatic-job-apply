@@ -114,8 +114,13 @@ def test_low_scoring_job_is_skipped_with_a_reason(runner, db):
     assert "unpaid" in (row["error"] or "").lower() or "years" in (row["error"] or "")
 
 
-def test_email_posting_is_drafted_not_sent(cfg, db, gemini, session, monkeypatch):
-    """A posting that says "email us your CV" becomes a draft file, never a send."""
+def test_email_posting_is_routed_to_outreach(cfg, db, gemini, session, monkeypatch):
+    """A posting that says "email us your CV" goes to the outreach queue.
+
+    The address in the job post is the first HR source outreach looks for, so
+    the runner records the job and leaves composing to --email-queue. Nothing
+    is sent, and no separate draft file is written.
+    """
     import runner as runner_module
 
     monkeypatch.setattr(runner_module, "load_source", lambda name: FixtureInternshala)
@@ -138,15 +143,23 @@ def test_email_posting_is_drafted_not_sent(cfg, db, gemini, session, monkeypatch
     job = source.get_job_details(job)
     assert job.apply_target == ApplyTarget.EMAIL
 
+    assert job.apply_email == "careers@fixturemedia.example"
+
     outcome = r.apply_by_email(job, cfg.resume("general"))
     assert outcome.status == "drafted"
+    assert "--email-queue" in outcome.reason
 
-    drafts = list(cfg.abs_path(cfg.email.drafts_dir).glob("*.txt"))
-    assert len(drafts) == 1
-    text = drafts[0].read_text(encoding="utf-8")
-    assert "careers@fixturemedia.example" in text
-    assert "NOT SENT" in text
-    assert cfg.resume("general").public_link in text
+    # The job and its address are recorded so outreach can pick them up.
+    r.record(job, "drafted", match_score=90, resume_variant="general")
+    row = [x for x in db.all_rows() if x["company"] == "Fixture Media"][0]
+    assert row["apply_email"] == "careers@fixturemedia.example"
+    assert row["description"]
+
+    # And the address really is discoverable from the stored description.
+    from contacts import contacts_from_job_post
+
+    found = contacts_from_job_post(row["company"], row["description"], row["url"])
+    assert [c.email for c in found] == ["careers@fixturemedia.example"]
 
 
 # ------------------------------------------------------------------ dedupe

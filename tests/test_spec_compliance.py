@@ -405,32 +405,319 @@ def _called_attributes(path: Path) -> set[str]:
     return names
 
 
-def test_nothing_in_the_project_sends_email():
-    """Only drafts().create() is ever called. No send path may exist."""
+def test_only_the_gmail_client_touches_the_send_endpoint():
+    """Sending must stay in one module, behind one gate.
+
+    This project now really does send email, so the guarantee changed shape:
+    instead of "nothing sends", it is "exactly one module can send, and only
+    when it is handed confirmed=True".
+    """
     for path in sorted(ROOT.glob("*.py")):
+        if path.name == "gmail_client.py":
+            continue
         called = _called_attributes(path)
-        assert "send" not in called, path.name + " calls .send()"
-        assert "send_message" not in called, path.name + " calls .send_message()"
+        assert "send" not in called, path.name + " must not call .send() itself"
 
     gmail_calls = _called_attributes(ROOT / "gmail_client.py")
-    assert "drafts" in gmail_calls, "the draft API is how this module works"
-    assert "messages" not in gmail_calls, "messages() is the send path"
-
-    gmail = (ROOT / "gmail_client.py").read_text(encoding="utf-8")
-    assert "gmail.send" not in gmail, "the send scope must never be requested"
+    assert "send" in gmail_calls, "gmail_client is the module that sends"
 
 
-def test_gmail_requests_only_the_compose_scope():
+def test_send_message_refuses_without_an_explicit_confirmation(cfg):
+    """The one switch between "the user approved this" and "code decided to"."""
+    from gmail_client import GmailSendRefused, send_message
+
+    from tests.mock_gmail import MockGmailService
+
+    service = MockGmailService()
+    with pytest.raises(GmailSendRefused):
+        send_message(
+            cfg, to="someone@example.com", subject="s", body="b", service=service
+        )
+    assert service.sent == [], "nothing may leave without confirmed=True"
+
+
+def test_send_message_refuses_an_invalid_address(cfg):
+    from gmail_client import send_message
+
+    from tests.mock_gmail import MockGmailService
+
+    service = MockGmailService()
+    for bad in ("", "not-an-address", None):
+        with pytest.raises(ValueError):
+            send_message(
+                cfg, to=bad, subject="s", body="b", service=service, confirmed=True
+            )
+    assert service.sent == []
+
+
+def test_only_the_sending_loop_passes_confirmed():
+    """confirmed=True may be passed from exactly one place: outreach.send_queue.
+
+    Parsed as real keyword arguments, so a docstring or an error message that
+    mentions confirmed=True doesn't count.
+    """
+    import ast
+
+    hits: list[str] = []
+    for path in sorted(ROOT.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            for keyword in node.keywords:
+                if keyword.arg != "confirmed":
+                    continue
+                if isinstance(keyword.value, ast.Constant) and keyword.value.value is True:
+                    hits.append("{0}:{1}".format(path.name, node.lineno))
+
+    assert len(hits) == 1, "confirmed=True should be passed once, found: " + ", ".join(hits)
+    assert hits[0].startswith("outreach.py"), hits[0]
+
+
+def test_gmail_asks_for_send_and_read_only_nothing_wider():
     from gmail_client import SCOPES
 
-    assert SCOPES == ["https://www.googleapis.com/auth/gmail.compose"]
+    assert SCOPES == [
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/gmail.readonly",
+    ]
+    text = (ROOT / "gmail_client.py").read_text(encoding="utf-8")
+    # Never the scopes that allow deleting or rewriting the mailbox.
+    for wider in ("gmail.modify", "mail.google.com", "gmail.settings"):
+        assert wider not in text, "must never request " + wider
 
 
-def test_gmail_is_off_by_default(example_config):
-    from config import EmailCfg
+def test_oauth_is_never_started_unattended():
+    """An unattended run must not block on a browser consent screen."""
+    import inspect
 
-    assert EmailCfg().gmail_api is False
-    assert example_config["email"]["gmail_api"] is False
+    import gmail_client
+
+    signature = inspect.signature(gmail_client.get_service)
+    assert signature.parameters["interactive"].default is True
+    source = inspect.getsource(gmail_client.get_service)
+    assert "if not interactive:" in source
+    assert "run_local_server" in source
+
+
+def test_no_password_based_mail_path_exists():
+    """Spec 8.1: OAuth only. No SMTP, no app password."""
+    for path in sorted(ROOT.glob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        for banned in (
+            "smtplib",
+            "SMTP(",
+            "smtp.login",
+            "server.login",
+            "GMAIL_PASSWORD",
+            "app_password",
+            "EMAIL_PASSWORD",
+        ):
+            assert banned not in text, path.name + " references " + banned
+
+
+def test_the_daily_sending_cap_can_never_exceed_forty(cfg):
+    from limits import daily_email_cap
+
+    for attempted in (41, 100, 10_000):
+        cfg.outreach.sending.daily_cap = attempted
+        assert daily_email_cap(cfg) == 40
+
+
+def test_the_default_sending_cap_is_twenty_five(example_config):
+    from config import EmailSendingCfg
+
+    assert EmailSendingCfg().daily_cap == 25
+    assert example_config["outreach"]["sending"]["daily_cap"] == 25
+
+
+def test_the_sending_window_defaults_to_weekday_mornings_ist(example_config):
+    from config import EmailSendingCfg
+
+    sending = EmailSendingCfg()
+    assert (sending.start_hour, sending.start_minute) == (9, 30)
+    assert (sending.end_hour, sending.end_minute) == (12, 30)
+    assert sending.timezone == "Asia/Kolkata"
+    assert sending.enforce_window is True
+    assert sending.weekdays_only is True
+
+    configured = example_config["outreach"]["sending"]
+    assert configured["start_hour"] == 9
+    assert configured["start_minute"] == 30
+    assert configured["end_hour"] == 12
+    assert configured["end_minute"] == 30
+    assert configured["enforce_window"] is True
+
+
+def test_weekends_are_refused(cfg, monkeypatch):
+    import limits
+
+    cfg.outreach.sending.enforce_window = True
+
+    class Saturday:
+        @staticmethod
+        def now(tz=None):
+            import datetime as real
+
+            # 2026-10-10 is a Saturday.
+            return real.datetime(2026, 10, 10, 10, 0, tzinfo=tz)
+
+    monkeypatch.setattr(limits, "datetime", Saturday)
+    ok, why = limits.email_window_now(cfg)
+    assert ok is False
+    assert "Monday to Friday" in why
+
+
+def test_outside_the_morning_window_is_refused(cfg, monkeypatch):
+    import limits
+
+    cfg.outreach.sending.enforce_window = True
+
+    class Afternoon:
+        @staticmethod
+        def now(tz=None):
+            import datetime as real
+
+            # 2026-10-08 is a Thursday, but 16:00 is outside 09:30-12:30.
+            return real.datetime(2026, 10, 8, 16, 0, tzinfo=tz)
+
+    monkeypatch.setattr(limits, "datetime", Afternoon)
+    ok, why = limits.email_window_now(cfg)
+    assert ok is False
+    assert "09:30" in why and "12:30" in why
+
+
+def test_inside_the_window_on_a_weekday_is_allowed(cfg, monkeypatch):
+    import limits
+
+    cfg.outreach.sending.enforce_window = True
+
+    class ThursdayMorning:
+        @staticmethod
+        def now(tz=None):
+            import datetime as real
+
+            return real.datetime(2026, 10, 8, 10, 15, tzinfo=tz)
+
+    monkeypatch.setattr(limits, "datetime", ThursdayMorning)
+    ok, _ = limits.email_window_now(cfg)
+    assert ok is True
+
+
+def test_the_gap_between_sends_is_three_to_eight_minutes(example_config):
+    from config import EmailSendingCfg
+
+    sending = EmailSendingCfg()
+    assert sending.gap_min_s == 180
+    assert sending.gap_max_s == 480
+    configured = example_config["outreach"]["sending"]
+    assert configured["gap_min_s"] == 180
+    assert configured["gap_max_s"] == 480
+
+
+def test_exactly_one_followup_is_ever_allowed(example_config):
+    """Spec 8.5: one follow-up. Never a second, whatever the config says."""
+    from config import OutreachCfg
+
+    assert OutreachCfg().max_followups == 1
+    for attempted in (2, 5, 99):
+        assert OutreachCfg(max_followups=attempted).max_followups == 1
+    assert example_config["outreach"]["max_followups"] == 1
+
+
+def test_the_followup_window_defaults_to_six_days(example_config):
+    from config import OutreachCfg
+
+    assert OutreachCfg().followup_after_days == 6
+    assert example_config["outreach"]["followup_after_days"] == 6
+
+
+def test_addresses_are_never_reused_inside_sixty_days(example_config):
+    from config import OutreachCfg
+
+    assert OutreachCfg().no_repeat_days == 60
+    assert example_config["outreach"]["no_repeat_days"] == 60
+
+
+def test_at_most_three_contacts_per_company(example_config):
+    from config import OutreachCfg
+
+    assert OutreachCfg().max_contacts_per_company == 3
+    assert example_config["outreach"]["max_contacts_per_company"] == 3
+
+
+def test_hunter_is_off_by_default_and_never_below_85(example_config):
+    from config import OutreachCfg
+
+    assert OutreachCfg().use_hunter is False
+    assert example_config["outreach"]["use_hunter"] is False
+    for attempted in (0, 50, 84):
+        assert OutreachCfg(hunter_min_confidence=attempted).hunter_min_confidence == 85
+
+
+def test_outreach_only_targets_jobs_at_seventy_or_above(example_config):
+    from config import OutreachCfg
+
+    assert OutreachCfg().match_threshold == 70
+    assert example_config["outreach"]["match_threshold"] == 70
+
+
+def test_addresses_are_never_pattern_guessed():
+    """The anti-spam rule, checked against the module that finds addresses."""
+    import inspect
+
+    import contacts as module
+
+    source = inspect.getsource(module)
+    for pattern in ('"{0}@{1}"', "'{0}@{1}'", 'first + "@"', '"." + last'):
+        assert pattern not in source, "looks like pattern guessing: " + pattern
+    # And the rule is actually enforced.
+    assert module.is_usable_work_email("someone@gmail.com") is False
+
+
+def test_personal_addresses_are_refused_everywhere():
+    from contacts import is_usable_work_email
+
+    for address in ("a@gmail.com", "b@outlook.com", "c@yahoo.com", "d@icloud.com"):
+        assert is_usable_work_email(address) is False
+
+
+def test_email_statuses_cover_the_spec_list():
+    from db import EMAIL_STATUSES
+
+    assert set(EMAIL_STATUSES) == {
+        "queued", "sent", "failed", "replied", "bounced", "skipped",
+    }
+
+
+def test_contact_roles_are_hr_founder_cofounder():
+    from db import CONTACT_ROLES
+
+    assert CONTACT_ROLES == ("hr", "founder", "cofounder")
+
+
+def test_the_email_commands_exist():
+    from main import build_parser
+
+    parser = build_parser()
+    for flag in (
+        "--email-queue",
+        "--email-auto",
+        "--email-followups",
+        "--email-report",
+        "--email-sync",
+        "--gmail-auth",
+        "--contacts-report",
+    ):
+        args = parser.parse_args([flag])
+        assert args is not None, flag
+
+
+def test_email_test_to_takes_an_address():
+    from main import build_parser
+
+    args = build_parser().parse_args(["--email-test-to", "me@example.com"])
+    assert args.email_test_to == "me@example.com"
 
 
 def test_auto_mode_can_never_touch_a_job_board():
