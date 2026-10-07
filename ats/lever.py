@@ -17,6 +17,23 @@ log = logging.getLogger(__name__)
 URL_MARKS = ("lever.co", "jobs.lever.co", "jobs.eu.lever.co", "hire.lever.co")
 
 
+def current_employer(ctx: FillContext) -> str:
+    """The candidate's current employer, or "" when there isn't one.
+
+    A fresher has no current company. Putting their college there would read
+    as employment history that doesn't exist, so the field is left empty.
+    """
+    profile = ctx.cfg.profile
+    level = (profile.experience_level or "").strip().lower()
+    never_employed = profile.years_of_experience <= 0 or level in (
+        "fresher",
+        "student",
+        "graduate",
+        "none",
+    )
+    return "" if never_employed else profile.college
+
+
 class LeverFiller(ATSFiller):
     name = "lever"
     form_selectors = [
@@ -81,7 +98,10 @@ class LeverFiller(ATSFiller):
             ("input[name='name']", "full_name", p.name),
             ("input[name='email']", "email", p.email),
             ("input[name='phone']", "phone", p.phone),
-            ("input[name='org']", "current_employer", p.college),
+            # "Current company" is left blank for someone who has never been
+            # employed - the college is not a current employer, and claiming it
+            # as one is the kind of small untruth this tool must not tell.
+            ("input[name='org']", "current_employer", current_employer(ctx)),
             ("input[name='urls[LinkedIn]']", "linkedin", p.linkedin),
             ("input[name='urls[GitHub]']", "github", p.github),
             ("input[name='urls[Portfolio]']", "portfolio", p.portfolio or ctx.resume.public_link),

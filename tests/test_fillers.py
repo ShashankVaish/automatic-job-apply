@@ -251,3 +251,72 @@ def test_lever_submit_found_and_not_clicked(lever_filled):
 def test_lever_is_not_multistep(lever_filled):
     _, filler, _ = lever_filled
     assert filler.has_next_button() is False
+
+
+# --------------------------------------- pay fields and employment history
+
+
+@pytest.mark.parametrize(
+    "label,expected_kind",
+    [
+        ("Expected monthly stipend (INR)", "stipend"),
+        ("Stipend expectation", "stipend"),
+        ("Expected pay per month", "stipend"),
+        ("Monthly salary expectation", "stipend"),
+        ("Expected CTC", "salary"),
+        ("Expected salary", "salary"),
+        ("Expected compensation", "salary"),
+    ],
+)
+def test_stipend_and_salary_fields_are_told_apart(label, expected_kind):
+    """A monthly stipend box will not accept an annual CTC figure."""
+    from ats.fields import classify
+
+    assert classify(label, {}) == expected_kind
+
+
+def test_a_monthly_field_gets_the_stipend_not_the_salary(cfg, gemini):
+    from ats.fields import FillContext, profile_value
+    from models import FillReport, Job
+
+    ctx = FillContext(
+        cfg=cfg,
+        job=Job(site="x", title="t", company="c", url="u"),
+        resume=cfg.resume("frontend"),
+        gemini=gemini,
+        report=FillReport(),
+        pacer=None,
+    )
+    assert profile_value("stipend", ctx) == cfg.profile.expected_stipend
+    assert profile_value("salary", ctx) == cfg.profile.expected_salary
+    assert profile_value("stipend", ctx) != profile_value("salary", ctx)
+
+
+def test_lever_leaves_current_company_blank_for_a_fresher(lever_filled, cfg):
+    """The college is not a current employer, and saying so would be untrue."""
+    page, _, ctx = lever_filled
+    assert cfg.profile.experience_level == "fresher"
+    assert page.input_value("input[name='org']") == ""
+
+
+def test_current_employer_is_filled_once_there_is_one(cfg, gemini):
+    from ats.fields import FillContext
+    from ats.lever import current_employer
+    from models import FillReport, Job
+
+    def ctx_for(level: str, years: int):
+        cfg.profile.experience_level = level
+        cfg.profile.years_of_experience = years
+        return FillContext(
+            cfg=cfg,
+            job=Job(site="x", title="t", company="c", url="u"),
+            resume=cfg.resume("general"),
+            gemini=gemini,
+            report=FillReport(),
+            pacer=None,
+        )
+
+    assert current_employer(ctx_for("fresher", 0)) == ""
+    assert current_employer(ctx_for("student", 0)) == ""
+    assert current_employer(ctx_for("0-1 years", 0)) == ""
+    assert current_employer(ctx_for("1-2 years", 2)) == cfg.profile.college

@@ -210,7 +210,17 @@ RULES: list[tuple[str, re.Pattern[str]]] = [
         ),
     ),
     ("location", re.compile(r"\bcity\b|current location|your location|where are you|\bhometown\b", re.I)),
-    ("salary", re.compile(r"salary|ctc|compensation|expected pay|stipend", re.I)),
+    # A monthly stipend and an annual salary are different numbers, and a
+    # form asking for one will not accept the other.
+    (
+        "stipend",
+        re.compile(
+            r"stipend|monthly (pay|pay expectation|compensation|salary)"
+            r"|per month|/month|pay per month",
+            re.I,
+        ),
+    ),
+    ("salary", re.compile(r"salary|ctc|compensation|expected pay|remuneration", re.I)),
     ("notice_period", re.compile(r"notice period|availability to (join|start)|when can you (join|start)", re.I)),
     ("graduation_year", re.compile(r"graduation (year|date)|year of (passing|graduation)|batch", re.I)),
     ("college", re.compile(r"college|university|institute|school name", re.I)),
@@ -267,6 +277,7 @@ def profile_value(kind: str, ctx: FillContext) -> str:
         "portfolio": p.portfolio or link,
         "location": p.location,
         "salary": p.expected_salary or p.expected_stipend,
+        "stipend": p.expected_stipend or p.expected_salary,
         "notice_period": p.notice_period,
         "graduation_year": str(p.graduation_year or ""),
         "college": p.college,
