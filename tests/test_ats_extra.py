@@ -223,3 +223,87 @@ def test_generic_filler_finds_the_send_button(page, cfg, gemini):
 def test_confirmation_pages_are_recognised(page, text, expected):
     page.set_content("<html><body><p>" + text + "</p></body></html>")
     assert GenericFiller(page).confirmed() is expected
+
+
+# ------------------------- a group must not borrow another field's label
+
+
+def test_a_consent_checkbox_does_not_steal_the_first_name_label(page, cfg, gemini):
+    """Regression: the privacy checkbox is wrapped in its own label, so the
+    question search climbed to <form> and returned "First name *", which was
+    then sent to Gemini as a yes/no question about consent."""
+    page.goto(fixture_url("smartrecruiters.html"))
+    filler = SmartRecruitersFiller(page)
+    filler.open_form()
+
+    job = job_for(page, "Graduate Engineer", "Fixture Global")
+    ctx = make_ctx(cfg, gemini, job)
+    filler.fill(ctx)
+
+    asked = [q for q, _ in ctx.report.questions]
+    unanswered = ctx.report.unknown_fields + ctx.report.review_reasons
+    for text in asked + unanswered:
+        assert "First name" not in text, (
+            "a checkbox must never be asked using another field's label"
+        )
+
+
+def test_an_already_ticked_consent_box_is_not_asked_about(page, cfg, gemini):
+    page.goto(fixture_url("smartrecruiters.html"))
+    filler = SmartRecruitersFiller(page)
+    filler.open_form()
+
+    job = job_for(page, "Graduate Engineer", "Fixture Global")
+    ctx = make_ctx(cfg, gemini, job)
+    filler.fill(ctx)
+
+    assert page.is_checked("#consent") is True
+    asked = [q.lower() for q, _ in ctx.report.questions]
+    assert not any("privacy" in q for q in asked), (
+        "the box is ticked before the question pass, so it should not be asked"
+    )
+
+
+def test_a_real_fieldset_group_is_still_asked(page, cfg, gemini):
+    """The scoping fix must not stop legitimate grouped questions working."""
+    from ats.greenhouse import GreenhouseFiller
+
+    page.goto(fixture_url("greenhouse.html"))
+    filler = GreenhouseFiller(page)
+    filler.open_form()
+
+    job = job_for(page, "Frontend Engineer Intern", "Fixture Labs")
+    ctx = make_ctx(cfg, gemini, job, variant="frontend")
+    filler.fill(ctx)
+
+    asked = [q for q, _ in ctx.report.questions]
+    assert any("relocate" in q.lower() for q in asked)
+    assert any("worked with" in q.lower() for q in asked)
+
+    checked = page.evaluate(
+        "() => [...document.querySelectorAll(\"input[name=relocate]\")]"
+        ".filter(i => i.checked).map(i => i.value)"
+    )
+    assert checked == ["yes"]
+
+
+def test_an_unlabelled_group_is_flagged_rather_than_guessed(page, cfg, gemini):
+    """With no question text we would be guessing, which is worse than asking
+    the user to look."""
+    page.set_content(
+        "<html><body><form>"
+        "<label>Full name</label><input type='text' name='name'>"
+        "<label><input type='checkbox' name='mystery'> Tick this</label>"
+        "<button type='submit'>Submit</button>"
+        "</form></body></html>"
+    )
+    filler = GenericFiller(page)
+    job = job_for(page)
+    ctx = make_ctx(cfg, gemini, job)
+    filler.fill(ctx)
+
+    assert page.is_checked("input[name='mystery']") is False
+    joined = " ".join(ctx.report.review_reasons).lower()
+    assert "what this option is asking" in joined or "unanswered" in joined
+    for q, _ in ctx.report.questions:
+        assert "Full name" not in q

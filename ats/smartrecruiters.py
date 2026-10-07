@@ -96,7 +96,11 @@ class SmartRecruitersFiller(ATSFiller):
             except Exception as exc:
                 log.debug("SmartRecruiters field %s skipped: %s", selector, exc)
 
-    def after_fill(self, ctx: FillContext, scope: Any) -> None:
+        # Done here rather than in after_fill: the screening-question pass runs
+        # in between, and an unticked box would be sent to Gemini as a question.
+        self.tick_consent(ctx, scope)
+
+    def tick_consent(self, ctx: FillContext, scope: Any) -> None:
         """Tick the privacy-consent box, which is required to submit.
 
         This is a factual consent to their privacy policy, not a claim about

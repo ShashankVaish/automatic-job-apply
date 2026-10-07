@@ -87,26 +87,43 @@ GROUP_QUESTION_JS = """
 (el) => {
   const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
   const name = el.getAttribute('name') || '';
+
+  // A container is only this question's scope while every control inside it
+  // belongs to the same group. Once it also holds other fields, any label in
+  // it could belong to one of those instead - which is how a consent
+  // checkbox once ended up asking "First name *".
+  const onlyOurGroup = (node) => {
+    const controls = node.querySelectorAll('input, select, textarea');
+    for (const c of controls) {
+      if (c === el) continue;
+      if (c.type === 'hidden') continue;
+      const cn = c.getAttribute('name') || '';
+      if (!name || cn !== name) return false;
+    }
+    return true;
+  };
+
   let node = el.parentElement;
   for (let i = 0; i < 8 && node; i++, node = node.parentElement) {
-    const legend = node.querySelector(':scope > legend, legend');
+    const tag = node.tagName.toLowerCase();
+
+    const legend = node.querySelector(':scope > legend');
     if (legend && !legend.querySelector('input, select, textarea')) {
       const t = clean(legend.innerText);
       if (t) return t;
     }
-    const groupSize = name
-      ? node.querySelectorAll(`[name="${CSS.escape(name)}"]`).length
-      : 1;
-    if (groupSize >= 2 || i >= 2) {
-      const cands = node.querySelectorAll(
-        'label, .label, .application-label, .field-label, legend'
-      );
-      for (const c of cands) {
-        if (c.querySelector('input, select, textarea')) continue;
-        if (c.contains(el)) continue;
-        const t = clean(c.innerText);
-        if (t && t.length > 2) return t;
-      }
+
+    if (!onlyOurGroup(node)) return '';
+    if (tag === 'form' || tag === 'body') return '';
+
+    const cands = node.querySelectorAll(
+      'label, .label, .application-label, .field-label, legend'
+    );
+    for (const c of cands) {
+      if (c.querySelector('input, select, textarea')) continue;
+      if (c.contains(el)) continue;
+      const t = clean(c.innerText);
+      if (t && t.length > 2) return t;
     }
   }
   return '';
@@ -542,6 +559,17 @@ def _select_options(sel: Any) -> list[str]:
         return []
 
 
+def _group_already_answered(siblings: list[Any]) -> bool:
+    """Is any member of this radio/checkbox group already selected?"""
+    for member in siblings:
+        try:
+            if member.is_checked(timeout=600):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def _group_name(attrs: dict[str, str]) -> str:
     return attrs.get("name") or attrs.get("id") or ""
 
@@ -585,6 +613,19 @@ def answer_questions(scope: Any, ctx: FillContext, leftovers: list[Any]) -> None
             if not options:
                 continue
             handled_groups.add(group)
+            # An earlier pass may already have ticked this (a required consent
+            # box, for instance), and re-asking risks a different answer.
+            if _group_already_answered(siblings):
+                continue
+            # Without a question we would be guessing at what is being asked,
+            # which is worse than leaving it for the user.
+            if not question or question.strip() == label.strip():
+                ctx.report.flag(
+                    "could not work out what this option is asking: "
+                    + (label or group or "unlabelled")[:70]
+                )
+                ctx.report.unknown_fields.append(label or group or "unlabelled option")
+                continue
             _ask_and_apply_group(ctx, siblings, options, question, ftype)
             continue
 
