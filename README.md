@@ -599,7 +599,7 @@ ats/
   detect.py             Works out which hiring system a page runs
   greenhouse.py  lever.py  ashby.py  smartrecruiters.py  workday.py  generic.py
 inputs/                 Your contact and target lists (examples committed)
-tests/                  311 tests, all offline
+tests/                  393 tests, all offline
 ```
 
 ## 17. Running the tests

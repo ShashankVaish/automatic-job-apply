@@ -3,7 +3,7 @@
 Overnight unattended build log. **Everything in both specs is implemented and
 tested. Start with the [Morning checklist](#morning-checklist) at the bottom.**
 
-Last updated: 2026-10-05, end of the overnight run.
+Last updated: 2026-10-08, after a follow-up hardening pass.
 
 ---
 
@@ -19,12 +19,12 @@ Last updated: 2026-10-05, end of the overnight run.
 | 6 | Cold email outreach, **rebuilt to the real spec you sent** | DONE |
 | 7 | Full spec review, README, this checklist | DONE |
 
-**311 tests pass. Every one runs offline.** No site was visited, no login was
+**393 tests pass. Every one runs offline.** No site was visited, no login was
 performed, no application was submitted, **no email was sent**, and the Gmail
 OAuth consent screen was never opened.
 
 ```
-python -m pytest        ->  311 passed
+python -m pytest        ->  393 passed
 ```
 
 ---
@@ -106,6 +106,74 @@ Gmail and Hunter.io are mocked in `tests/mock_gmail.py`. The mock records what
 *would* have been sent, so the real sending code — every gate, the window, the
 caps, the reply check, the threading — is genuinely exercised with nothing
 leaving the machine.
+
+---
+
+## Follow-up hardening pass (2026-10-08)
+
+Went looking for defects rather than adding features. Seven real bugs, all
+found by running the tool and reading its output rather than by reading code.
+
+**The timezone was never resolving.** Windows ships no system timezone
+database, so `zoneinfo` could not load `Asia/Kolkata` - or any zone - and both
+safety windows silently fell back to local time. On a machine not set to IST
+the 09:00-21:00 run window and the Mon-Fri 09:30-12:30 sending window were
+simply wrong, with one log line as the only clue. `tzdata` is now a declared
+dependency, the failure is reported in every window message instead of
+swallowed, and `--check` has a timezone row.
+
+**Three config keys did nothing.** `retry_misses_after_days`,
+`follow_contact_page` and `weekdays_only` were declared and never read, so
+editing them had no effect. The first mattered most: `contact_misses` rows were
+written and never consulted, so every run re-scraped the same company sites for
+an answer that rarely changes. A spec test now walks the config models and
+fails if any outreach key is unread anywhere.
+
+**A checkbox could be asked using another field's label.** On the
+SmartRecruiters form the consent box is wrapped in its own label, so the
+question search climbed to `<form>` and returned the first label in the entire
+form - "First name *" - which went to Gemini as a yes/no question about
+consent. A container now only counts as a group's scope while every control in
+it belongs to that group, and a group with no identifiable question is flagged
+rather than guessed at.
+
+**The wrong pay figure in stipend fields.** "6 LPA" was being typed into
+"Expected monthly stipend (INR)". Stipend and salary are now separate field
+kinds matched on monthly/per-month wording.
+
+**The college was being listed as a current employer.** Lever's "Current
+company" was filled with the college name. A fresher has no current employer,
+and listing their college as one reads as employment history that does not
+exist. Left blank unless the profile shows actual employment.
+
+**Gmail authorised itself mid-review.** `send_queue` was called without a
+service, so the first reply check built one - meaning an unauthorised user got
+the OAuth browser window *after* reviewing a queue, and a missing
+`credentials.json` surfaced as a mid-run exception. Resolved up front now,
+with an instruction to run `--gmail-auth`.
+
+### And one weakness closed
+
+Reply detection searched `from:@<company-domain>` only, so it missed a reply
+from a recruiter's personal address, from a colleague on another domain, or
+from an ATS on a different host - exactly when you most want outreach to stop.
+The thread the email was sent in is now read first: anything in it that is not
+from you is a reply, whatever address it came from. Used by both `--email-sync`
+and the gate before every send.
+
+### Tests added
+
+82 new tests, bringing the suite to 393:
+
+| Area | Why it was missing |
+|---|---|
+| `test_prompts.py` (22) | The prompts are the whole product for anything Gemini writes, and the only part of email quality checkable without a key |
+| `test_cli.py` (25) | The modules were covered but the glue in `main.py` was not, so a renamed flag broke nothing |
+| Contacts, ATS, spec (35) | Regressions for each bug above, plus the config-must-be-read guard |
+
+`--check` also now covers the outreach prerequisites: which `inputs/` files
+exist, whether Gmail is authorised, and whether `HUNTER_API_KEY` is present
+when `use_hunter` is on.
 
 ---
 
@@ -213,7 +281,7 @@ Real defects, not test problems.
 
 ## Git
 
-- **13 commits tonight** (plus your "this first commit" = 14 total).
+- **22 commits in total** on `main`, including the follow-up hardening pass.
 - **Everything is pushed.** `git log origin/main..HEAD` is empty, tree clean.
 - Remote: `https://github.com/ShashankVaish/automatic-job-apply.git`, branch
   `main`. Never force-pushed, no history rewritten, no branches created.
@@ -226,20 +294,26 @@ Real defects, not test problems.
   history found no keys.
 
 ```
+dacd8d4 test(prompts): assert the prompts carry every spec constraint
+13f442b fix(ats): a checkbox could be asked using an unrelated field's label
+780660f fix(ats): wrong pay figure in stipend fields, college as current employer
+f3d5be6 test(cli): cover the command wiring, and extend --check to outreach
+eaa43f4 fix(limits): IST never resolved, so both time windows used local time
+343bbf1 feat(outreach): detect replies by reading the thread, not just the domain
+f5c18d5 fix(config): three settings were declared but never read
+d8b32f7 docs: final progress log and morning checklist for the outreach rebuild
 561011e docs: rewrite README for the real outreach spec, and drop dead config
 3cc9b40 feat(outreach): Gmail sending, queue review and the single follow-up
 e943fe0 feat(outreach): contact discovery for HR, founder and co-founder (spec 8.2)
 b026700 docs: correct the commit count and refresh the git log in PROGRESS
 fcc00ff docs: final progress log, spec coverage and morning checklist
 a546108 fix(config): reject every unreplaced [placeholder], not just six fields
-646d0bb docs: rewrite README with all features, including email outreach setup
+646d0bb docs: rewrite README for every feature, including outreach and Gmail setup
 f8256ad test: add spec-compliance suite and enforce the cover-letter word limit
-c8f6cbd feat(outreach): add cold email outreach (superseded by the real spec)
+c8f6cbd feat(outreach): add cold email outreach, replacing spec sections 8 and 10
 42f159f feat(email): add Gmail draft client, follow-ups and report hardening
 9aadd59 feat(sites,ats): add LinkedIn, Naukri, Indeed and the remaining fillers
 515584f test(modes): cover assist, review, auto and dry-run submit rules
-b8b0cb9 fix(sites): resolve relative links against the current page
-4f71e86 this first commit
 ```
 
 `.gitignore` covers `.env`, `credentials.json`, `token.json`, `config.yaml`,
@@ -307,7 +381,7 @@ PowerShell blocks the script:
 python -m pytest
 ```
 
-Expect `311 passed`. If anything fails, read it before going further.
+Expect `393 passed`. If anything fails, read it before going further.
 
 ### 3. Add your API key
 
@@ -497,8 +571,8 @@ python main.py --report-days 30      # applications
 ### Things worth knowing before you start
 
 - **Selectors are the weak point.** Boards change markup constantly and I could
-  not test against the live sites. Everything else has 311 tests behind it;
-  this part doesn't, and it's where problems will appear first.
+  not test against the live sites. Everything else has 393 tests behind it;
+  this part does not, and it is where problems will appear first.
 - **Gmail's real behaviour is the second weak point.** The OAuth flow, the real
   send, follow-up threading and the reply search are mock-tested only. Step 13
   exists specifically to shake those out safely.
