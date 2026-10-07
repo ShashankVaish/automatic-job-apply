@@ -58,10 +58,11 @@ def email_window_now(cfg: Config) -> tuple[bool, str]:
     if not sending.enforce_window:
         return True, "sending window not enforced (now {0})".format(label)
 
-    if now.weekday() > 4:
+    if sending.weekdays_only and now.weekday() > 4:
         return False, (
             "It is {0}. Cold email is only sent Monday to Friday. "
-            "Set outreach.sending.enforce_window: false to override.".format(label)
+            "Set outreach.sending.weekdays_only: false to send at weekends, or "
+            "enforce_window: false to bypass the whole check.".format(label)
         )
 
     minutes = now.hour * 60 + now.minute

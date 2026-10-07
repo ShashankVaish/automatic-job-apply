@@ -478,3 +478,112 @@ def test_no_pattern_guessing_anywhere_in_the_module():
         '"." + last',
     ):
         assert pattern not in source, "looks like pattern guessing: " + pattern
+
+
+# ------------------------------------------------ config that must do something
+
+
+def test_a_recent_miss_stops_the_site_being_scraped_again(cfg, db, page, monkeypatch):
+    """retry_misses_after_days must actually prevent a re-scrape."""
+    visits: list[str] = []
+    import contacts as module
+
+    real_visit = module._visit
+
+    def counting_visit(p, url):
+        visits.append(url)
+        return real_visit(p, url)
+
+    monkeypatch.setattr(module, "_visit", counting_visit)
+
+    first = discover_contacts(
+        cfg, db, company="Fixture Silent",
+        website=fixture_url("company_site_no_email.html"), page=page,
+    )
+    assert first.contacts == []
+    assert visits, "the first run should look at the site"
+    assert db.contact_miss("Fixture Silent", ROLE_HR) is not None
+
+    visits.clear()
+    second = discover_contacts(
+        cfg, db, company="Fixture Silent",
+        website=fixture_url("company_site_no_email.html"), page=page,
+    )
+    assert visits == [], "a fresh miss must stop the re-scrape"
+    assert any("skipped scraping" in n for n in second.notes)
+    # Still reported as a miss, so the caller's counts stay honest.
+    assert second.misses
+
+
+def test_an_expired_miss_allows_another_look(cfg, db, page):
+    from contacts import has_fresh_miss
+
+    db.record_contact_miss("Fixture Silent", ROLE_HR, "no_email_found")
+    assert has_fresh_miss(db, "Fixture Silent", ROLE_HR, 30) is True
+
+    # Backdate it beyond the window.
+    with db.conn:
+        db.conn.execute(
+            "UPDATE contact_misses SET date_tried='2020-01-01' WHERE company=?",
+            ("Fixture Silent",),
+        )
+    assert has_fresh_miss(db, "Fixture Silent", ROLE_HR, 30) is False
+
+
+def test_retry_window_of_zero_disables_the_skip(cfg, db):
+    from contacts import has_fresh_miss
+
+    db.record_contact_miss("Fixture Silent", ROLE_HR, "no_email_found")
+    assert has_fresh_miss(db, "Fixture Silent", ROLE_HR, 0) is False
+
+
+def test_a_malformed_miss_date_does_not_raise(cfg, db):
+    from contacts import has_fresh_miss
+
+    db.record_contact_miss("Fixture Silent", ROLE_HR, "no_email_found")
+    with db.conn:
+        db.conn.execute("UPDATE contact_misses SET date_tried='not-a-date'")
+    assert has_fresh_miss(db, "Fixture Silent", ROLE_HR, 30) is False
+
+
+def test_follow_contact_page_false_stays_on_the_landing_page(page, cfg):
+    """With the flag off, only the landing page is read.
+
+    The careers page has careers@; the homepage footer only has hello@. So the
+    flag changes which address is found, and is visible in the source label.
+    """
+    found_on, _ = hr_from_company_site(
+        page, "Fixture Robotics", fixture_url("company_site.html"),
+        follow_contact_page=True,
+    )
+    found_off, _ = hr_from_company_site(
+        page, "Fixture Robotics", fixture_url("company_site.html"),
+        follow_contact_page=False,
+    )
+    assert [c.email for c in found_on] == ["careers@fixturerobotics.example"]
+    assert found_on[0].source == "careers_page"
+
+    assert [c.email for c in found_off] == ["hello@fixturerobotics.example"]
+    assert found_off[0].source == "company_site", (
+        "an address from the homepage footer must not be labelled careers_page"
+    )
+    assert found_off[0].confidence < found_on[0].confidence
+
+
+def test_the_source_url_points_at_the_page_the_address_was_on(page, cfg):
+    found, _ = hr_from_company_site(
+        page, "Fixture Robotics", fixture_url("company_site.html")
+    )
+    assert found[0].source_url.endswith("company_site_careers.html")
+
+
+def test_follow_contact_page_is_respected_by_discovery(cfg, db, page):
+    cfg.outreach.follow_contact_page = False
+    result = discover_contacts(
+        cfg, db, company="Fixture Robotics",
+        website=fixture_url("company_site.html"), page=page,
+    )
+    hr = result.by_role(ROLE_HR)
+    assert hr, "the homepage address is still found"
+    assert hr[0].source == "company_site"
+    assert all(c.source != "careers_page" for c in result.contacts)

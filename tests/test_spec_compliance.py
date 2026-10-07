@@ -887,3 +887,54 @@ def test_a_dry_run_is_never_recorded_as_applied(cfg, db, gemini):
     )
     assert outcome.status != "applied"
     assert "not submitted" in outcome.reason
+
+
+# ----------------------------------- config that must not be decoration
+
+
+def test_every_outreach_config_key_is_actually_read():
+    """A setting nobody reads is a lie to the person editing the file.
+
+    This caught retry_misses_after_days, follow_contact_page and
+    weekdays_only, all of which were declared and ignored.
+    """
+    from config import EmailSendingCfg, OutreachCfg
+
+    code = "\n".join(
+        (ROOT / name).read_text(encoding="utf-8")
+        for name in (
+            "main.py", "outreach.py", "contacts.py", "limits.py",
+            "gmail_client.py", "runner.py", "db.py",
+        )
+    )
+
+    # Keys that are plumbing rather than behaviour.
+    exempt = {"enabled", "outbox_dir", "hard_max"}
+
+    for model in (OutreachCfg, EmailSendingCfg):
+        for key in model.model_fields:
+            if key in exempt or key == "sending":
+                continue
+            assert key in code, (
+                "{0}.{1} is declared in config but never read".format(
+                    model.__name__, key
+                )
+            )
+
+
+def test_weekend_sending_can_be_enabled_deliberately(cfg, monkeypatch):
+    import limits
+
+    cfg.outreach.sending.enforce_window = True
+    cfg.outreach.sending.weekdays_only = False
+
+    class Saturday:
+        @staticmethod
+        def now(tz=None):
+            import datetime as real
+
+            return real.datetime(2026, 10, 10, 10, 0, tzinfo=tz)
+
+    monkeypatch.setattr(limits, "datetime", Saturday)
+    ok, _ = limits.email_window_now(cfg)
+    assert ok is True, "weekdays_only: false should allow a Saturday send"

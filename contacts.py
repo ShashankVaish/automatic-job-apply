@@ -28,6 +28,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urljoin, urlparse
@@ -109,6 +110,24 @@ class Contact:
         return "{0} <{1}> ({2} at {3})".format(
             who, self.email, self.role, self.company or "?"
         )
+
+
+def has_fresh_miss(db: Database, company: str, role: str, within_days: int) -> bool:
+    """Did we already fail to find this role recently?
+
+    Stops the same company's site being scraped on every run when they simply
+    don't publish an address.
+    """
+    if within_days <= 0:
+        return False
+    row = db.contact_miss(company, role)
+    if row is None:
+        return False
+    try:
+        tried = datetime.strptime(row["date_tried"], "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return False
+    return (date.today() - tried).days < within_days
 
 
 @dataclass
@@ -347,9 +366,18 @@ def _candidate_pages(page: Any, base_url: str, paths: tuple[str, ...]) -> list[s
 
 
 def hr_from_company_site(
-    page: Any, company: str, website: str
+    page: Any,
+    company: str,
+    website: str,
+    *,
+    follow_contact_page: bool = True,
 ) -> tuple[list[Contact], list[str]]:
-    """Look for a hiring address on the careers or contact page."""
+    """Look for a hiring address on the careers or contact page.
+
+    `follow_contact_page=False` keeps us on the landing page only, which is
+    what `outreach.follow_contact_page: false` is for - fewer requests to
+    someone else's site.
+    """
     notes: list[str] = []
     if not website:
         return [], ["no website known"]
@@ -359,14 +387,26 @@ def hr_from_company_site(
     if not text:
         return [], ["company website would not load"]
 
-    pool = addresses_in(text) + _mailto_addresses(page)
-    pages = _candidate_pages(page, website, CAREERS_PATHS)
+    # Keep track of which page each address came from, so the contact records
+    # where it was really found rather than a blanket "careers_page".
+    origin: dict[str, str] = {}
 
+    def remember(addresses: list[str], url: str) -> None:
+        for raw in addresses:
+            origin.setdefault(raw.strip().strip(".,;:()<>[]'\"").lower(), url)
+
+    landing = addresses_in(text) + _mailto_addresses(page)
+    remember(landing, website)
+    pool = list(landing)
+
+    pages = _candidate_pages(page, website, CAREERS_PATHS) if follow_contact_page else []
     for url in pages:
         sub_text = _visit(page, url)
         if not sub_text:
             continue
-        pool += addresses_in(sub_text) + _mailto_addresses(page)
+        sub = addresses_in(sub_text) + _mailto_addresses(page)
+        remember(sub, url)
+        pool += sub
         notes.append("checked " + url)
 
     on_domain = [a for a in clean_addresses(pool) if matches_company_domain(a, company_domain)]
@@ -374,21 +414,29 @@ def hr_from_company_site(
     if not address:
         return [], notes + ["no hiring address published on the site"]
 
+    found_at = origin.get(address, website)
+    on_landing_page = found_at == website
     return [
         Contact(
             company=company,
             email=address,
             role=ROLE_HR,
-            source="careers_page",
-            source_url=website,
-            confidence=90,
+            # A hiring inbox on a careers page is a stronger signal than a
+            # general address in a homepage footer, so say which it was.
+            source="company_site" if on_landing_page else "careers_page",
+            source_url=found_at,
+            confidence=85 if on_landing_page else 90,
             note="published on the company site",
         )
     ], notes
 
 
 def founders_from_company_site(
-    page: Any, company: str, website: str
+    page: Any,
+    company: str,
+    website: str,
+    *,
+    follow_contact_page: bool = True,
 ) -> tuple[list[Contact], list[str]]:
     """Read the about/team page for founder names and published work emails.
 
@@ -402,7 +450,7 @@ def founders_from_company_site(
 
     company_domain = site_domain(website)
     text = _visit(page, website)
-    pages = _candidate_pages(page, website, TEAM_PATHS)
+    pages = _candidate_pages(page, website, TEAM_PATHS) if follow_contact_page else []
     if not pages and not text:
         return [], ["company website would not load"]
 
@@ -658,17 +706,39 @@ def discover_contacts(
             accept(contact)
         needs_hr = not result.by_role(ROLE_HR)
 
+    # Don't scrape a company's site again if we drew a blank recently. It is
+    # their bandwidth, and the answer rarely changes inside a month.
+    retry_after = int(cfg.outreach.retry_misses_after_days)
+    scraping_roles = [ROLE_HR, ROLE_FOUNDER, ROLE_COFOUNDER][:max_contacts]
+    fresh_miss = all(
+        has_fresh_miss(db, company, role, retry_after)
+        for role in scraping_roles
+        if not result.by_role(role)
+    ) and any(not result.by_role(role) for role in scraping_roles)
+
+    if fresh_miss and len(result.contacts) < max_contacts:
+        result.notes.append(
+            "skipped scraping {0}: nothing found within the last {1} days".format(
+                company, retry_after
+            )
+        )
+
     # 3/4. The company's own site.
     domain = site_domain(website)
-    if page is not None and website:
+    if page is not None and website and not fresh_miss:
+        follow = bool(cfg.outreach.follow_contact_page)
         if needs_hr:
-            found, notes = hr_from_company_site(page, company, website)
+            found, notes = hr_from_company_site(
+                page, company, website, follow_contact_page=follow
+            )
             result.notes += notes
             for contact in found:
                 accept(contact)
 
         if len(result.contacts) < max_contacts:
-            found, notes = founders_from_company_site(page, company, website)
+            found, notes = founders_from_company_site(
+                page, company, website, follow_contact_page=follow
+            )
             result.notes += notes
             for contact in found:
                 accept(contact)
@@ -692,7 +762,8 @@ def discover_contacts(
         if not result.by_role(role):
             reason = "no_email_found"
             result.misses.append((role, reason))
-            db.record_contact_miss(company, role, reason)
+            if not fresh_miss:
+                db.record_contact_miss(company, role, reason)
             log.info("%s: no work email found for %s", company, role)
 
     return result
