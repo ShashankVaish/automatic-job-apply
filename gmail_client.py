@@ -309,6 +309,52 @@ def find_reply_from_domain(
     return None
 
 
+def thread_messages(
+    cfg: Config, thread_id: str, *, service: Any | None = None
+) -> list[dict[str, Any]]:
+    """Every message in one thread, with headers."""
+    if not thread_id:
+        return []
+    svc = service or get_service(cfg)
+    try:
+        thread = (
+            svc.users()
+            .threads()
+            .get(userId="me", id=thread_id, format="metadata")
+            .execute()
+        )
+    except Exception as exc:
+        log.warning("Could not read thread %s: %s", thread_id, exc)
+        return []
+    return list(thread.get("messages") or [])
+
+
+def find_reply_in_thread(
+    cfg: Config, thread_id: str, *, service: Any | None = None
+) -> dict[str, Any] | None:
+    """Did anyone other than you write in this thread?
+
+    More reliable than searching by domain: it catches a reply from a personal
+    address, from a colleague on another domain, or from an ATS on a different
+    host - none of which a `from:@company` search would find.
+    """
+    own = (cfg.profile.email or "").strip().lower()
+    for message in thread_messages(cfg, thread_id, service=service):
+        headers = _headers(message)
+        sender = headers.get("from", "").lower()
+        if not sender:
+            continue
+        if own and own in sender:
+            continue  # our own message in the thread
+        subject = headers.get("subject", "").lower()
+        if any(bad in sender for bad in BOUNCE_SENDERS):
+            continue
+        if any(hint in subject for hint in BOUNCE_SUBJECT_HINTS):
+            continue
+        return message
+    return None
+
+
 def find_bounced_addresses(
     cfg: Config, *, within_days: int = 30, service: Any | None = None
 ) -> dict[str, str]:

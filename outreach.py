@@ -603,6 +603,9 @@ def sync_replies_and_bounces(
         bounces += 1
         log.info("Marked %s as bounced; it will never be used again", address)
 
+    # Read the threads we sent in first: anything in one of them that isn't
+    # from us is a reply, whatever address it came from.
+    threads: dict[str, list[str]] = {}
     companies: dict[str, str] = {}
     for row in db.email_rows(None):
         if row["status"] not in ("sent", "queued"):
@@ -610,7 +613,34 @@ def sync_replies_and_bounces(
         domain = domain_of(row["recipient_email"])
         if domain:
             companies.setdefault(row["company"], domain)
+        if row["gmail_thread_id"]:
+            threads.setdefault(row["company"], []).append(row["gmail_thread_id"])
 
+    for company, thread_ids in threads.items():
+        if db.company_replied(company) is not None:
+            continue
+        for thread_id in dict.fromkeys(thread_ids):
+            try:
+                found = gmail_client.find_reply_in_thread(
+                    cfg, thread_id, service=service
+                )
+            except Exception as exc:
+                log.warning("Thread reply check failed for %s: %s", company, exc)
+                continue
+            if found is not None:
+                snippet = (found.get("snippet") or "")[:200]
+                db.mark_company_replied(
+                    company, companies.get(company, ""), snippet
+                )
+                replies += 1
+                log.info(
+                    "%s replied (found in the thread) - all outreach to them stops",
+                    company,
+                )
+                break
+
+    # Then the domain search, which catches a reply sent as a fresh message
+    # rather than in the thread.
     for company, domain in companies.items():
         if db.company_replied(company) is not None:
             continue
@@ -785,15 +815,29 @@ def send_queue(
                 stats.skipped += 1
                 continue
 
-        # Check their domain for a reply right before sending.
+        # Look for a reply right before sending: first in any thread we
+        # already have with this company, then by their domain.
         domain = domain_of(address)
-        try:
-            replied = gmail_client.find_reply_from_domain(
-                cfg, domain, within_days=cfg.outreach.no_repeat_days, service=service
-            )
-        except Exception as exc:
-            log.warning("Could not check for a reply from %s: %s", domain, exc)
-            replied = None
+        replied = None
+        for prior in db.email_rows(None):
+            if replied is not None:
+                break
+            if prior["company"] != company or not prior["gmail_thread_id"]:
+                continue
+            try:
+                replied = gmail_client.find_reply_in_thread(
+                    cfg, prior["gmail_thread_id"], service=service
+                )
+            except Exception as exc:
+                log.warning("Could not check the thread for %s: %s", company, exc)
+        if replied is None:
+            try:
+                replied = gmail_client.find_reply_from_domain(
+                    cfg, domain, within_days=cfg.outreach.no_repeat_days, service=service
+                )
+            except Exception as exc:
+                log.warning("Could not check for a reply from %s: %s", domain, exc)
+                replied = None
         if replied is not None:
             db.mark_company_replied(company, domain, (replied.get("snippet") or "")[:200])
             stats.skipped += 1

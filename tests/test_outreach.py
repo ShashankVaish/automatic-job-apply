@@ -733,3 +733,100 @@ def test_contacts_report_shows_where_each_contact_came_from(cfg, db, capsys):
     assert "contacts_csv" in out
     assert "No work email found" in out
     assert "never guessed" in out
+
+
+# ------------------------------- replies that a domain search would miss
+
+
+def test_a_reply_from_a_personal_address_is_detected(cfg, db, gemini, gmail):
+    """The gap this closes: a recruiter replying from their gmail, not from
+    @company. A `from:@company` search would never see it."""
+    queue_one_email(cfg, db, gemini)
+    send(cfg, db, gmail)
+    thread_id = gmail.sent[0].thread_id
+
+    gmail.add_thread_reply(
+        thread_id, sender="Priya Nair <priya.nair.personal@gmail.com>"
+    )
+
+    replies, _ = sync_replies_and_bounces(cfg, db, service=gmail)
+    assert replies == 1
+    assert db.company_replied("Fixture Labs") is not None
+    assert db.email_rows(None)[0]["status"] == "replied"
+
+
+def test_a_reply_from_another_domain_is_detected(cfg, db, gemini, gmail):
+    """A colleague on a different domain, or an ATS on another host."""
+    queue_one_email(cfg, db, gemini)
+    send(cfg, db, gmail)
+    gmail.add_thread_reply(
+        gmail.sent[0].thread_id,
+        sender="Talent Team <noreply-ats@greenhouse-mail.example>",
+    )
+    replies, _ = sync_replies_and_bounces(cfg, db, service=gmail)
+    assert replies == 1
+
+
+def test_our_own_message_in_the_thread_is_not_a_reply(cfg, db, gemini, gmail):
+    """The thread always contains our own email; that must not count."""
+    queue_one_email(cfg, db, gemini)
+    send(cfg, db, gmail)
+
+    assert gmail.threads[gmail.sent[0].thread_id], "the send is recorded in the thread"
+    replies, _ = sync_replies_and_bounces(cfg, db, service=gmail)
+    assert replies == 0
+    assert db.company_replied("Fixture Labs") is None
+
+
+def test_a_bounce_in_the_thread_is_not_a_reply(cfg, db, gemini, gmail):
+    queue_one_email(cfg, db, gemini)
+    send(cfg, db, gmail)
+    gmail.add_thread_bounce(gmail.sent[0].thread_id)
+
+    replies, _ = sync_replies_and_bounces(cfg, db, service=gmail)
+    assert replies == 0, "a delivery failure is not interest"
+
+
+def test_a_thread_reply_stops_the_next_send_to_that_company(cfg, db, gemini, gmail):
+    """The pre-send gate must consult the thread too, not only the domain."""
+    write_contacts_csv(
+        cfg,
+        "Fixture Labs,Priya Nair,hr,hr@fixturelabs.example,,\n"
+        "Fixture Labs,Arjun Mehta,founder,arjun@fixturelabs.example,,\n",
+    )
+    build_queue(cfg, db, gemini, [Target(company="Fixture Labs", job_role="Intern")])
+    send(cfg, db, gmail)                      # HR goes out
+    assert len(gmail.sent) == 1
+
+    # They reply from a personal address, so only the thread reveals it.
+    gmail.add_thread_reply(
+        gmail.sent[0].thread_id, sender="Priya <priya@gmail.com>"
+    )
+    # Make the founder email due.
+    with db.conn:
+        db.conn.execute("UPDATE emails SET scheduled_for=date('now','-1 day')")
+
+    stats = send(cfg, db, gmail)
+    assert stats.sent == 0
+    assert stats.replied_stops == 1
+    assert len(gmail.sent) == 1, "the founder must not be emailed after a reply"
+
+
+def test_find_reply_in_thread_handles_an_unknown_thread(cfg, gmail):
+    from gmail_client import find_reply_in_thread
+
+    assert find_reply_in_thread(cfg, "no-such-thread", service=gmail) is None
+    assert find_reply_in_thread(cfg, "", service=gmail) is None
+
+
+def test_a_thread_read_failure_does_not_stop_the_sync(cfg, db, gemini, gmail):
+    queue_one_email(cfg, db, gemini)
+    send(cfg, db, gmail)
+
+    class Exploding:
+        def users(self):
+            raise RuntimeError("Gmail unavailable")
+
+    replies, bounces = sync_replies_and_bounces(cfg, db, service=Exploding())
+    assert (replies, bounces) == (0, 0)
+    assert db.email_rows(None)[0]["status"] == "sent", "nothing is wrongly marked"

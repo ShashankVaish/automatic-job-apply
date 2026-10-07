@@ -56,6 +56,19 @@ class MockMessages:
         message_id = "msg-{0}".format(service.counter)
         thread_id = body.get("threadId") or "thread-{0}".format(service.counter)
 
+        service.threads.setdefault(thread_id, []).append(
+            {
+                "id": message_id,
+                "snippet": "",
+                "payload": {
+                    "headers": [
+                        {"name": "From", "value": service.address},
+                        {"name": "Subject", "value": subject},
+                        {"name": "To", "value": to},
+                    ]
+                },
+            }
+        )
         service.sent.append(
             SentRecord(
                 to=to,
@@ -93,12 +106,25 @@ class MockDrafts:
         return _Execute({"id": draft_id})
 
 
+class MockThreads:
+    def __init__(self, service: "MockGmailService") -> None:
+        self.service = service
+
+    def get(self, userId: str, id: str, format: str = "metadata") -> _Execute:
+        self.service.thread_reads.append(id)
+        messages = self.service.threads.get(id, [])
+        return _Execute({"id": id, "messages": messages})
+
+
 class MockUsers:
     def __init__(self, service: "MockGmailService") -> None:
         self.service = service
 
     def messages(self) -> MockMessages:
         return MockMessages(self.service)
+
+    def threads(self) -> MockThreads:
+        return MockThreads(self.service)
 
     def drafts(self) -> MockDrafts:
         return MockDrafts(self.service)
@@ -116,6 +142,8 @@ class MockGmailService:
         self.drafts: list[dict] = []
         self.searches: list[str] = []
         self.inbox: list[dict] = []
+        self.threads: dict[str, list[dict]] = {}
+        self.thread_reads: list[str] = []
         self.counter = 0
         self.fail_next_send = False
 
@@ -142,6 +170,53 @@ class MockGmailService:
                         {"name": "From", "value": sender},
                         {"name": "Subject", "value": subject},
                         {"name": "To", "value": to or self.address},
+                    ]
+                },
+            }
+        )
+
+    def add_thread_reply(
+        self,
+        thread_id: str,
+        *,
+        sender: str = "Priya Nair <priya@personal-address.example>",
+        snippet: str = "Thanks, can we talk on Friday?",
+    ) -> None:
+        """A reply inside a thread, from any address at all."""
+        self.counter += 1
+        self.threads.setdefault(thread_id, []).append(
+            {
+                "id": "th-{0}".format(self.counter),
+                "snippet": snippet,
+                "payload": {
+                    "headers": [
+                        {"name": "From", "value": sender},
+                        {"name": "Subject", "value": "Re: Application"},
+                        {"name": "To", "value": self.address},
+                    ]
+                },
+            }
+        )
+
+    def add_thread_bounce(self, thread_id: str) -> None:
+        """A bounce notice landing in the thread - not a reply."""
+        self.counter += 1
+        self.threads.setdefault(thread_id, []).append(
+            {
+                "id": "th-{0}".format(self.counter),
+                "snippet": "Address not found",
+                "payload": {
+                    "headers": [
+                        {
+                            "name": "From",
+                            "value": "Mail Delivery Subsystem "
+                            "<mailer-daemon@googlemail.com>",
+                        },
+                        {
+                            "name": "Subject",
+                            "value": "Delivery Status Notification (Failure)",
+                        },
+                        {"name": "To", "value": self.address},
                     ]
                 },
             }
