@@ -938,3 +938,69 @@ def test_weekend_sending_can_be_enabled_deliberately(cfg, monkeypatch):
     monkeypatch.setattr(limits, "datetime", Saturday)
     ok, _ = limits.email_window_now(cfg)
     assert ok is True, "weekdays_only: false should allow a Saturday send"
+
+
+# ------------------------------------------- the timezone the windows need
+
+
+def test_the_ist_timezone_actually_resolves():
+    """Both safety windows are defined in IST.
+
+    Windows ships no system timezone database, so without `tzdata` zoneinfo
+    resolves nothing and every window silently becomes local time - which is
+    wrong on any machine not already on IST. This caught exactly that.
+    """
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo("Asia/Kolkata")
+    assert zone is not None
+
+    from datetime import datetime
+
+    assert datetime.now(zone).tzinfo is not None
+
+
+def test_tzdata_is_a_declared_dependency():
+    text = (ROOT / "requirements.txt").read_text(encoding="utf-8").lower()
+    assert "tzdata" in text, "the timezone database must be installed, not assumed"
+
+
+def test_a_missing_timezone_is_reported_not_swallowed():
+    from limits import resolve_timezone
+
+    tz, warning = resolve_timezone("Asia/Kolkata")
+    assert tz is not None
+    assert warning == ""
+
+    tz, warning = resolve_timezone("Not/ARealZone")
+    assert tz is None
+    assert "local time" in warning
+    assert "tzdata" in warning, "the message must say how to fix it"
+
+
+def test_the_window_explanation_carries_the_timezone_warning(cfg):
+    """A fallback to local time must be visible in what the user is shown."""
+    from limits import email_window_now, now_in_window
+
+    cfg.limits.run_window.timezone = "Not/ARealZone"
+    cfg.outreach.sending.timezone = "Not/ARealZone"
+
+    _, why = now_in_window(cfg)
+    assert "local time" in why
+
+    cfg.outreach.sending.enforce_window = True
+    _, why = email_window_now(cfg)
+    assert "local time" in why
+
+
+def test_check_reports_the_timezone(cfg, db, capsys, monkeypatch):
+    from main import cmd_check
+
+    # Keep the Gemini row from making a network call.
+    import ai.gemini_client as gc
+
+    monkeypatch.setattr(gc.GeminiClient, "ping", lambda self: '{"ok": true}')
+    cmd_check(cfg, db)
+    out = capsys.readouterr().out
+    assert "timezone" in out
+    assert "Asia/Kolkata" in out

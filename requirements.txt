@@ -3,6 +3,10 @@ google-genai>=0.3.0
 pydantic>=2.7
 python-dotenv>=1.0
 PyYAML>=6.0
+# Windows ships no system timezone database, so zoneinfo cannot resolve
+# Asia/Kolkata without this. Without it the run and sending windows would
+# silently fall back to local time.
+tzdata>=2024.1
 tenacity>=8.2
 rich>=13.7
 google-api-python-client>=2.140

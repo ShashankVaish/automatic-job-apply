@@ -301,6 +301,23 @@ def cmd_check(cfg: Config, db: Database) -> int:
     enabled = [s for s in ALL_SITES if cfg.source(s).enabled]
     row("sources enabled", bool(enabled), ", ".join(enabled) or "none enabled in config.yaml")
 
+    # Both safety windows are defined in IST, so a missing timezone database
+    # would silently turn them into local time.
+    from limits import resolve_timezone
+
+    zone = cfg.limits.run_window.timezone
+    tz, tz_warning = resolve_timezone(zone)
+    if tz is None:
+        row("timezone", False, tz_warning)
+    else:
+        from datetime import datetime as _dt
+
+        row(
+            "timezone",
+            True,
+            "{0} is {1}".format(zone, _dt.now(tz).strftime("%a %H:%M")),
+        )
+
     # Gemini last: it's the only check that costs a network call.
     from ai.gemini_client import GeminiClient, GeminiUnavailable
 
@@ -467,6 +484,35 @@ def _gemini(cfg: Config):
     return GeminiClient(cfg)
 
 
+def _gmail_service(cfg: Config):
+    """Build the Gmail service up front, or explain what to do instead.
+
+    Returns (service, None) on success, or (None, exit_code) when the caller
+    should stop. Resolving it here means a missing credentials.json is a clear
+    message before anything is shown, rather than an exception part-way through
+    a review you already spent time on.
+    """
+    import gmail_client
+
+    try:
+        return gmail_client.get_service(cfg, interactive=False), None
+    except gmail_client.GmailNotConfigured as exc:
+        first_line = str(exc).strip().splitlines()[0]
+        console.print("[red]Gmail is not ready.[/] " + escape(first_line))
+        console.print(
+            "Run [bold]python main.py --gmail-auth[/] once to authorise it, "
+            "then try again. Section 11 of README.md has the Google Cloud setup."
+        )
+        return None, 1
+    except Exception as exc:
+        console.print(
+            "[red]Could not reach Gmail:[/] {0}: {1}".format(
+                type(exc).__name__, escape(str(exc))
+            )
+        )
+        return None, 1
+
+
 def cmd_gmail_auth(cfg: Config) -> int:
     """Do the one-time Gmail consent so later runs are silent."""
     import gmail_client
@@ -586,10 +632,17 @@ def cmd_email_send(cfg: Config, db: Database, args, *, mode: str) -> int:
         )
         return 2
 
+    # Resolved before the first email is shown, so an authorisation problem
+    # never interrupts a review half way through.
+    service, failure = _gmail_service(cfg)
+    if service is None:
+        return failure or 1
+
     stats = send_queue(
         cfg,
         db,
         mode=mode,
+        service=service,
         test_to=test_to,
         limit=args.max,
         ignore_window=args.ignore_run_window,
@@ -646,7 +699,11 @@ def cmd_email_sync(cfg: Config, db: Database) -> int:
     """Read your mailbox for replies and bounces."""
     from outreach import sync_replies_and_bounces
 
-    replies, bounces = sync_replies_and_bounces(cfg, db)
+    service, failure = _gmail_service(cfg)
+    if service is None:
+        return failure or 1
+
+    replies, bounces = sync_replies_and_bounces(cfg, db, service=service)
     console.print(
         "Found [bold]{0}[/] new repl{1} and [bold]{2}[/] bounce{3}.".format(
             replies, "y" if replies == 1 else "ies", bounces, "" if bounces == 1 else "s"
