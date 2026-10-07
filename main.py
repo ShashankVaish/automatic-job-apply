@@ -318,6 +318,64 @@ def cmd_check(cfg: Config, db: Database) -> int:
             "{0} is {1}".format(zone, _dt.now(tz).strftime("%a %H:%M")),
         )
 
+    # ---- outreach prerequisites -------------------------------------
+    if cfg.outreach.enabled:
+        inputs = {
+            "contacts.csv": cfg.outreach.contacts_csv,
+            "companies.csv": cfg.outreach.companies_csv,
+            "job_urls.txt": cfg.outreach.job_urls,
+            "blocklist.txt": cfg.outreach.blocklist,
+        }
+        present = [name for name, path in inputs.items() if cfg.abs_path(path).is_file()]
+        # None of these are required: outreach also works from matched jobs.
+        table.add_row(
+            "outreach inputs",
+            "[green]OK[/]" if present else "[yellow]--[/]",
+            escape(
+                ", ".join(present)
+                if present
+                else "none yet - copy the .example files in inputs/ when you want them"
+            ),
+        )
+
+        import gmail_client
+
+        creds_path, token_path = gmail_client._paths(cfg)
+        if token_path.is_file():
+            row("Gmail", True, "authorised, token at " + str(token_path))
+        elif creds_path.is_file():
+            table.add_row(
+                "Gmail",
+                "[yellow]--[/]",
+                escape(
+                    "credentials.json found but not authorised yet - run "
+                    "`python main.py --gmail-auth`"
+                ),
+            )
+        else:
+            table.add_row(
+                "Gmail",
+                "[yellow]--[/]",
+                escape(
+                    "not set up. Only needed for outreach; see section 11 of "
+                    "README.md, then run `python main.py --gmail-auth`"
+                ),
+            )
+
+        if cfg.outreach.use_hunter:
+            import os
+
+            has_key = bool(os.getenv("HUNTER_API_KEY", "").strip())
+            row(
+                "Hunter.io",
+                has_key,
+                "key present, minimum confidence {0}".format(
+                    cfg.outreach.hunter_min_confidence
+                )
+                if has_key
+                else "use_hunter is true but HUNTER_API_KEY is not set in .env",
+            )
+
     # Gemini last: it's the only check that costs a network call.
     from ai.gemini_client import GeminiClient, GeminiUnavailable
 
